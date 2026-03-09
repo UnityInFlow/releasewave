@@ -24,5 +24,6 @@ coverage.html
 .DS_Store
 Thumbs.db
 
-# Config with secrets
+# Config with secrets (not the example)
 config.yaml
+!config.example.yaml

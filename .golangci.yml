@@ -1,0 +1,18 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - gofmt
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+
+issues:
+  exclude-dirs:
+    - .agents
+    - deep-dive

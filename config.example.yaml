@@ -1,0 +1,33 @@
+# ReleaseWave configuration
+# https://github.com/UnityInFlow/releasewave
+
+# Microservices to track
+services:
+  # - name: my-api
+  #   repo: github.com/my-org/my-api
+  #   registry: ghcr.io/my-org/my-api
+  # - name: billing
+  #   repo: gitlab.com/my-org/billing
+
+# API tokens (can also use GITHUB_TOKEN / GITLAB_TOKEN env vars)
+tokens:
+  github: ""
+  gitlab: ""
+
+# Cache settings
+cache:
+  ttl: 15m
+
+# MCP server settings
+server:
+  port: 7891
+
+# Rate limiting (requests per second)
+rate_limit:
+  github: 5
+  gitlab: 3
+
+# Logging
+log:
+  level: info    # debug, info, warn, error
+  format: text   # text, json

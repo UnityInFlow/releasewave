@@ -1,12 +1,3 @@
-// Package github implements the Provider interface for GitHub.
-//
-// Go learning notes:
-//   - encoding/json is the standard library for JSON parsing
-//   - fmt.Sprintf is like printf but returns a string
-//   - defer resp.Body.Close() ensures the body is closed when the function returns
-//   - slices are dynamic arrays — append() adds elements
-//   - &variable gives you a pointer to that variable
-//   - struct{} embedding (not used here yet) is Go's version of composition
 package github
 
 import (
@@ -14,43 +5,53 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
+	rwerrors "github.com/UnityInFlow/releasewave/internal/errors"
 	"github.com/UnityInFlow/releasewave/internal/model"
+	"github.com/UnityInFlow/releasewave/internal/ratelimit"
 )
 
-// defaultBaseURL is the production GitHub API endpoint.
-// GO LEARNING: constants vs struct fields
-//   We moved baseURL from a const to a struct field so tests can override it.
-//   This is a common Go pattern — make things configurable via struct fields,
-//   but provide sensible defaults in the constructor.
 const defaultBaseURL = "https://api.github.com"
 
-// Client is the GitHub provider. It implements the provider.Provider interface.
+// Client is the GitHub provider.
 type Client struct {
 	httpClient *http.Client
 	token      string
-	baseURL    string // Configurable for testing — defaults to GitHub API
+	baseURL    string
+	limiter    *ratelimit.Limiter
+}
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithBaseURL overrides the API base URL (for testing).
+func WithBaseURL(url string) Option {
+	return func(c *Client) { c.baseURL = url }
+}
+
+// WithRateLimiter sets a rate limiter.
+func WithRateLimiter(l *ratelimit.Limiter) Option {
+	return func(c *Client) { c.limiter = l }
 }
 
 // New creates a new GitHub client.
-// The token is optional — without it, you get 60 requests/hour (with: 5000/hour).
-func New(token string) *Client {
-	return &Client{
+func New(token string, opts ...Option) *Client {
+	c := &Client{
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		token:      token,
 		baseURL:    defaultBaseURL,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-// Name returns "github".
-func (c *Client) Name() string {
-	return "github"
-}
+func (c *Client) Name() string { return "github" }
 
-// githubRelease is the JSON shape returned by the GitHub API.
-// We keep this private (lowercase first letter) — it's an implementation detail.
 type githubRelease struct {
 	TagName     string `json:"tag_name"`
 	Name        string `json:"name"`
@@ -61,7 +62,6 @@ type githubRelease struct {
 	HTMLURL     string `json:"html_url"`
 }
 
-// githubTag is the JSON shape for tags from the GitHub API.
 type githubTag struct {
 	Name   string `json:"name"`
 	Commit struct {
@@ -69,7 +69,6 @@ type githubTag struct {
 	} `json:"commit"`
 }
 
-// ListReleases fetches all releases for a GitHub repository.
 func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.Release, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=30", c.baseURL, owner, repo)
 
@@ -97,10 +96,10 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.
 		})
 	}
 
+	slog.Debug("github.list_releases", "owner", owner, "repo", repo, "count", len(releases))
 	return releases, nil
 }
 
-// GetLatestRelease fetches the latest release for a GitHub repository.
 func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*model.Release, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", c.baseURL, owner, repo)
 
@@ -115,7 +114,7 @@ func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*mod
 	}
 
 	publishedAt, _ := time.Parse(time.RFC3339, gr.PublishedAt)
-	return &model.Release{
+	release := &model.Release{
 		Tag:         gr.TagName,
 		Name:        gr.Name,
 		Body:        gr.Body,
@@ -123,10 +122,12 @@ func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*mod
 		Prerelease:  gr.Prerelease,
 		PublishedAt: publishedAt,
 		HTMLURL:     gr.HTMLURL,
-	}, nil
+	}
+
+	slog.Debug("github.latest_release", "owner", owner, "repo", repo, "tag", release.Tag)
+	return release, nil
 }
 
-// ListTags fetches all tags for a GitHub repository.
 func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]model.Tag, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/tags?per_page=30", c.baseURL, owner, repo)
 
@@ -148,11 +149,15 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]model.Tag,
 		})
 	}
 
+	slog.Debug("github.list_tags", "owner", owner, "repo", repo, "count", len(tags))
 	return tags, nil
 }
 
-// doRequest is a helper that makes an authenticated HTTP GET request.
 func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -163,6 +168,8 @@ func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
+	slog.Debug("github.request", "url", url)
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
@@ -170,11 +177,9 @@ func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d for %s", resp.StatusCode, url)
+		return nil, rwerrors.NewProviderError("github", resp.StatusCode, url)
 	}
 
-	// GO LEARNING: io.ReadAll reads the entire response body into a byte slice.
-	// This is the standard way — our custom readAll was reinventing the wheel.
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)

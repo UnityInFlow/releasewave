@@ -7,33 +7,16 @@ import (
 	"testing"
 )
 
-// GO LEARNING: Test Structure Reuse
-//
-// Notice this test file has the SAME structure as github_test.go:
-//   1. fakeServer helper
-//   2. newTestClient helper
-//   3. Table-driven tests
-//
-// This is the Go testing idiom — once you learn the pattern,
-// every test file looks familiar. That's the point.
-
 func fakeGitLabServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// GO LEARNING: r.URL.RawPath vs r.URL.Path
-		//   Go's HTTP server decodes percent-encoding in the path automatically.
-		//   r.URL.Path = decoded ("/projects/testorg/testrepo/releases")
-		//   r.URL.RawPath = original ("/projects/testorg%2Ftestrepo/releases")
-		//   We use RawPath to match the GitLab-style encoded path.
-		//   If RawPath is empty, fall back to Path.
 		path := r.URL.RawPath
 		if path == "" {
 			path = r.URL.Path
 		}
 
 		switch path {
-
 		case "/projects/testorg%2Ftestrepo/releases",
 			"/projects/testorg/testrepo/releases":
 			w.Header().Set("Content-Type", "application/json")
@@ -82,17 +65,12 @@ func fakeGitLabServer(t *testing.T) *httptest.Server {
 }
 
 func newTestClient(serverURL string) *Client {
-	return &Client{
-		httpClient: http.DefaultClient,
-		token:      "fake-token",
-		baseURL:    serverURL,
-	}
+	return New("fake-token", WithBaseURL(serverURL))
 }
 
 func TestListReleases(t *testing.T) {
 	server := fakeGitLabServer(t)
 	defer server.Close()
-
 	client := newTestClient(server.URL)
 
 	tests := []struct {
@@ -102,49 +80,24 @@ func TestListReleases(t *testing.T) {
 		wantCount int
 		wantErr   bool
 	}{
-		{
-			name:      "returns releases for valid project",
-			owner:     "testorg",
-			repo:      "testrepo",
-			wantCount: 2,
-			wantErr:   false,
-		},
-		{
-			name:      "returns empty for project with no releases",
-			owner:     "testorg",
-			repo:      "empty",
-			wantCount: 0,
-			wantErr:   false,
-		},
-		{
-			name:    "returns error for server error",
-			owner:   "testorg",
-			repo:    "broken",
-			wantErr: true,
-		},
-		{
-			name:    "returns error for non-existent project",
-			owner:   "testorg",
-			repo:    "doesnotexist",
-			wantErr: true,
-		},
+		{"returns releases for valid project", "testorg", "testrepo", 2, false},
+		{"returns empty for no releases", "testorg", "empty", 0, false},
+		{"returns error for server error", "testorg", "broken", 0, true},
+		{"returns error for non-existent project", "testorg", "doesnotexist", 0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			releases, err := client.ListReleases(context.Background(), tt.owner, tt.repo)
-
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			if len(releases) != tt.wantCount {
 				t.Errorf("got %d releases, want %d", len(releases), tt.wantCount)
 			}
@@ -155,18 +108,14 @@ func TestListReleases(t *testing.T) {
 func TestListReleases_ContentCheck(t *testing.T) {
 	server := fakeGitLabServer(t)
 	defer server.Close()
-
 	client := newTestClient(server.URL)
+
 	releases, err := client.ListReleases(context.Background(), "testorg", "testrepo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	first := releases[0]
-
-	// GO LEARNING: Checking multiple fields in sequence
-	// Each check is independent — if one fails, we still see the others.
-	// t.Errorf continues the test; t.Fatalf would stop it.
 	if first.Tag != "v3.0.0" {
 		t.Errorf("tag = %q, want %q", first.Tag, "v3.0.0")
 	}
@@ -181,7 +130,6 @@ func TestListReleases_ContentCheck(t *testing.T) {
 func TestGetLatestRelease(t *testing.T) {
 	server := fakeGitLabServer(t)
 	defer server.Close()
-
 	client := newTestClient(server.URL)
 
 	t.Run("returns latest release", func(t *testing.T) {
@@ -205,18 +153,15 @@ func TestGetLatestRelease(t *testing.T) {
 func TestListTags(t *testing.T) {
 	server := fakeGitLabServer(t)
 	defer server.Close()
-
 	client := newTestClient(server.URL)
 
 	tags, err := client.ListTags(context.Background(), "testorg", "testrepo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if len(tags) != 2 {
 		t.Fatalf("got %d tags, want 2", len(tags))
 	}
-
 	if tags[0].Name != "v3.0.0" {
 		t.Errorf("first tag = %q, want %q", tags[0].Name, "v3.0.0")
 	}
@@ -225,10 +170,7 @@ func TestListTags(t *testing.T) {
 	}
 }
 
-// GO LEARNING: projectPath encoding test
 func TestProjectPath(t *testing.T) {
-	// This tests our URL encoding helper.
-	// "myorg/myrepo" should become "myorg%2Fmyrepo" for GitLab API.
 	result := projectPath("myorg", "myrepo")
 	expected := "myorg%2Fmyrepo"
 	if result != expected {

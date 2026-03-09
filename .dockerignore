@@ -1,0 +1,13 @@
+bin/
+dist/
+.git/
+.github/
+.agents/
+.claude/
+.junie/
+.windsurf/
+deep-dive/
+*.md
+Makefile
+.goreleaser.yml
+.golangci.yml
