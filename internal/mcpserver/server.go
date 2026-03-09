@@ -59,6 +59,7 @@ func New(cfg *config.Config, version string) *Server {
 	}
 
 	s.registerTools()
+	s.registerExtendedTools()
 	return s
 }
 
@@ -343,7 +344,10 @@ func (s *Server) MCPServer() *server.MCPServer {
 func (s *Server) Info() string {
 	var b strings.Builder
 	b.WriteString("ReleaseWave MCP Server\n")
-	b.WriteString("Tools: list_releases, get_latest_release, list_tags, check_services, find_outdated\n")
+	b.WriteString("Tools: list_releases, get_latest_release, list_tags, check_services, find_outdated,\n")
+	b.WriteString("       list_image_tags, compare_image_tags, list_k8s_deployments,\n")
+	b.WriteString("       compare_release_vs_deployed, changelog_between_versions,\n")
+	b.WriteString("       security_advisories, release_timeline\n")
 	b.WriteString(fmt.Sprintf("Providers: github, gitlab\n"))
 	b.WriteString(fmt.Sprintf("Services configured: %d\n", len(s.config.Services)))
 	return b.String()

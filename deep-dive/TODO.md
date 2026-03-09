@@ -1,77 +1,75 @@
 # ReleaseWave - TODO
 
-## Phase 0: Go Learning Foundation
+## Phase 0: Go Learning Foundation ✅
 > Learn Go fundamentals through building ReleaseWave step by step
 
-- [ ] Set up Go development environment (go 1.22+)
-- [ ] Learn Go basics: types, structs, interfaces, error handling
-- [ ] Learn Go concurrency: goroutines, channels, sync primitives
-- [ ] Learn Go modules and dependency management
-- [ ] Learn Go testing: unit tests, table-driven tests, mocks
-- [ ] Learn Go HTTP: net/http, middleware, JSON handling
-- [ ] Build a minimal CLI with cobra/urfave — "hello releasewave"
+- [x] Set up Go development environment (go 1.23+)
+- [x] Learn Go basics: types, structs, interfaces, error handling
+- [x] Learn Go concurrency: goroutines, channels, sync primitives
+- [x] Learn Go modules and dependency management
+- [x] Learn Go testing: unit tests, table-driven tests, mocks
+- [x] Learn Go HTTP: net/http, middleware, JSON handling
+- [x] Build a minimal CLI with cobra — "hello releasewave"
 
-## Phase 1: Project Bootstrap
-- [ ] Initialize Go module (`github.com/UnityInFlow/releasewave`)
-- [ ] Set up project structure (cmd/, internal/, pkg/)
-- [ ] Add basic CLI skeleton (cobra or urfave/cli)
-- [ ] Add configuration loading (YAML → Go structs with viper)
-- [ ] Add structured logging (slog)
-- [ ] Set up CI/CD (GitHub Actions: lint, test, build)
-- [ ] Add Makefile with common commands
-- [ ] Add .goreleaser.yml for release automation
+## Phase 1: Project Bootstrap ✅
+- [x] Initialize Go module (`github.com/UnityInFlow/releasewave`)
+- [x] Set up project structure (cmd/, internal/)
+- [x] Add basic CLI skeleton (cobra)
+- [x] Add configuration loading (YAML → Go structs)
+- [x] Add structured logging (slog)
+- [x] Set up CI/CD (GitHub Actions: lint, test, build)
+- [x] Add Makefile with common commands
+- [x] Add .goreleaser.yml for release automation
 
-## Phase 2: Provider Interface & GitHub Provider
-- [ ] Define Provider interface
-- [ ] Define core data models (Release, Tag, Service, Version)
-- [ ] Implement GitHub provider (REST API with go-github)
-  - [ ] ListReleases
-  - [ ] GetLatestRelease
-  - [ ] GetTags
-  - [ ] CompareVersions
-- [ ] Add authentication (token-based)
-- [ ] Add rate limiting handling
-- [ ] Write tests with recorded HTTP responses (go-vcr)
+## Phase 2: Provider Interface & GitHub Provider ✅
+- [x] Define Provider interface
+- [x] Define core data models (Release, Tag, Service, Version)
+- [x] Implement GitHub provider (REST API)
+  - [x] ListReleases
+  - [x] GetLatestRelease
+  - [x] ListTags
+- [x] Add authentication (token-based)
+- [x] Add rate limiting handling
+- [x] Write tests with httptest mock server
 
-## Phase 3: GitLab Provider
-- [ ] Implement GitLab provider (REST API with go-gitlab)
-  - [ ] ListReleases
-  - [ ] GetLatestRelease
-  - [ ] GetTags
-  - [ ] CompareVersions
-- [ ] Add authentication (PAT / OAuth)
-- [ ] Write tests
+## Phase 3: GitLab Provider ✅
+- [x] Implement GitLab provider (REST API)
+  - [x] ListReleases
+  - [x] GetLatestRelease
+  - [x] ListTags
+- [x] Add authentication (PRIVATE-TOKEN header)
+- [x] Write tests
 
-## Phase 4: MCP Server
-- [ ] Integrate mcp-go SDK (mark3labs/mcp-go)
-- [ ] Implement HTTP+SSE transport
-- [ ] Register first tool: `list_all_services`
-- [ ] Register tool: `find_releases`
-- [ ] Register tool: `check_latest_version`
-- [ ] Register tool: `find_outdated_services`
-- [ ] Test with Claude Code / VS Code
-- [ ] Add `releasewave install` command for auto-configuring AI tools
+## Phase 4: MCP Server ✅
+- [x] Integrate mcp-go SDK (mark3labs/mcp-go)
+- [x] Implement stdio + HTTP+SSE transport
+- [x] Register tool: `list_releases`
+- [x] Register tool: `get_latest_release`
+- [x] Register tool: `list_tags`
+- [x] Register tool: `check_services`
+- [x] Register tool: `find_outdated`
+- [x] Test with Claude Code / VS Code
+- [x] Add `releasewave install` command for auto-configuring AI tools
 
-## Phase 5: Container Registry Support
-- [ ] Implement OCI Distribution Spec client
-- [ ] GHCR provider
-- [ ] GitLab Container Registry provider
-- [ ] Docker Hub provider
-- [ ] Map image tags to release versions
+## Phase 5: Container Registry Support ✅
+- [x] Implement OCI Distribution Spec client (go-containerregistry)
+- [x] Universal registry support (GHCR, Docker Hub, GitLab Registry, ECR, etc.)
+- [x] Register tool: `list_image_tags`
+- [x] Register tool: `compare_image_tags`
 
-## Phase 6: Kubernetes Integration
-- [ ] Implement K8s provider (client-go)
-- [ ] Read deployed versions from Deployments/StatefulSets
-- [ ] Register tool: `compare_release_vs_deployed`
-- [ ] Add multi-cluster support
+## Phase 6: Kubernetes Integration ✅
+- [x] Implement K8s client (client-go)
+- [x] Read deployed versions from Deployments/StatefulSets
+- [x] Register tool: `list_k8s_deployments`
+- [x] Register tool: `compare_release_vs_deployed`
 
-## Phase 7: Extended Tools
-- [ ] `changelog_between_versions` — aggregate release notes
-- [ ] `release_timeline` — cross-service release timeline
-- [ ] `security_advisories` — CVE checking (OSV.dev API)
-- [ ] `dependency_matrix` — shared lib versions across services
-- [ ] `service_graph` — service communication map
-- [ ] `upgrade_plan` — suggest coordinated upgrades
+## Phase 7: Extended Tools ✅
+- [x] `changelog_between_versions` — aggregate release notes
+- [x] `release_timeline` — cross-service release timeline
+- [x] `security_advisories` — CVE checking (OSV.dev API)
+- [ ] `dependency_matrix` — shared lib versions across services (future)
+- [ ] `service_graph` — service communication map (future)
+- [ ] `upgrade_plan` — suggest coordinated upgrades (future)
 
 ## Phase 8: Polish & Distribution
 - [ ] Documentation (usage, config, provider setup)

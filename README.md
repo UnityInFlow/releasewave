@@ -8,8 +8,11 @@ Universal release/version aggregator for microservices. Checks releases across G
 
 ## Features
 
-- **Multi-platform**: GitHub and GitLab release tracking (more coming)
-- **MCP Server**: 5 tools accessible by Claude Code, Cursor, VS Code Copilot, and more
+- **Multi-platform**: GitHub and GitLab release tracking
+- **MCP Server**: 12 tools accessible by Claude Code, Cursor, VS Code Copilot, and more
+- **Container Registry**: Query image tags from any OCI-compatible registry (GHCR, Docker Hub, ECR, etc.)
+- **Kubernetes**: Read deployed versions from Deployments/StatefulSets
+- **Security**: CVE checking via OSV.dev database
 - **CLI**: Direct commands for querying releases, tags, and service status
 - **Concurrent**: Checks multiple services in parallel
 - **Cached**: In-memory cache with configurable TTL
@@ -62,6 +65,8 @@ releasewave check                     # check all configured services
 
 ## MCP Tools
 
+### Core Tools
+
 | Tool | Description |
 |------|-------------|
 | `list_releases` | List releases for a GitHub/GitLab repository |
@@ -69,6 +74,28 @@ releasewave check                     # check all configured services
 | `list_tags` | List git tags with commit SHAs |
 | `check_services` | Check all configured services |
 | `find_outdated` | Find services behind their latest release |
+
+### Container Registry Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_image_tags` | List tags from any OCI registry (GHCR, Docker Hub, ECR, etc.) |
+| `compare_image_tags` | Check if two image tags point to the same digest |
+
+### Kubernetes Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_k8s_deployments` | List deployments/statefulsets with their image versions |
+| `compare_release_vs_deployed` | Compare latest release vs what's deployed in K8s |
+
+### Extended Analysis Tools
+
+| Tool | Description |
+|------|-------------|
+| `changelog_between_versions` | Aggregate release notes between two versions |
+| `security_advisories` | Check for CVEs affecting a package version (OSV.dev) |
+| `release_timeline` | Cross-service release timeline sorted by date |
 
 ## Configuration
 
@@ -126,7 +153,10 @@ internal/
   provider/               Provider interface + cached decorator
     github/               GitHub REST API client
     gitlab/               GitLab REST API client
-  mcpserver/              MCP server (stdio + SSE transport)
+  mcpserver/              MCP server (stdio + SSE, 12 tools)
+  registry/               OCI container registry client
+  k8s/                    Kubernetes integration (client-go)
+  security/               Vulnerability checking (OSV.dev API)
   cache/                  Thread-safe in-memory TTL cache
   ratelimit/              Token-bucket rate limiter
   errors/                 Typed errors (NotFound, RateLimit, Auth)
