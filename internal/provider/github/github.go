@@ -13,18 +13,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/UnityInFlow/releasewave/internal/model"
 )
 
-const baseURL = "https://api.github.com"
+// defaultBaseURL is the production GitHub API endpoint.
+// GO LEARNING: constants vs struct fields
+//   We moved baseURL from a const to a struct field so tests can override it.
+//   This is a common Go pattern — make things configurable via struct fields,
+//   but provide sensible defaults in the constructor.
+const defaultBaseURL = "https://api.github.com"
 
 // Client is the GitHub provider. It implements the provider.Provider interface.
 type Client struct {
 	httpClient *http.Client
 	token      string
+	baseURL    string // Configurable for testing — defaults to GitHub API
 }
 
 // New creates a new GitHub client.
@@ -33,6 +40,7 @@ func New(token string) *Client {
 	return &Client{
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		token:      token,
+		baseURL:    defaultBaseURL,
 	}
 }
 
@@ -63,7 +71,7 @@ type githubTag struct {
 
 // ListReleases fetches all releases for a GitHub repository.
 func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.Release, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=30", baseURL, owner, repo)
+	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=30", c.baseURL, owner, repo)
 
 	body, err := c.doRequest(ctx, url)
 	if err != nil {
@@ -94,7 +102,7 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.
 
 // GetLatestRelease fetches the latest release for a GitHub repository.
 func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*model.Release, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", baseURL, owner, repo)
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", c.baseURL, owner, repo)
 
 	body, err := c.doRequest(ctx, url)
 	if err != nil {
@@ -120,7 +128,7 @@ func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*mod
 
 // ListTags fetches all tags for a GitHub repository.
 func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]model.Tag, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/tags?per_page=30", baseURL, owner, repo)
+	url := fmt.Sprintf("%s/repos/%s/%s/tags?per_page=30", c.baseURL, owner, repo)
 
 	body, err := c.doRequest(ctx, url)
 	if err != nil {
@@ -165,30 +173,12 @@ func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected status %d for %s", resp.StatusCode, url)
 	}
 
-	var buf []byte
-	buf, err = readAll(resp.Body)
+	// GO LEARNING: io.ReadAll reads the entire response body into a byte slice.
+	// This is the standard way — our custom readAll was reinventing the wheel.
+	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	return buf, nil
-}
-
-// readAll reads all bytes from a reader. Separated for clarity.
-func readAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
-	var result []byte
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			result = append(result, buf[:n]...)
-		}
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			return nil, err
-		}
-	}
-	return result, nil
 }

@@ -13,11 +13,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/UnityInFlow/releasewave/internal/config"
+	"github.com/UnityInFlow/releasewave/internal/mcpserver"
 	gh "github.com/UnityInFlow/releasewave/internal/provider/github"
 )
 
@@ -30,6 +33,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "serve":
+		cmdServe()
 	case "releases":
 		cmdReleases()
 	case "latest":
@@ -56,6 +61,7 @@ Usage:
   releasewave <command> [arguments]
 
 Commands:
+  serve                    Start the MCP server (for AI agent integration)
   releases <owner/repo>    List releases for a GitHub repository
   latest   <owner/repo>    Show the latest release
   tags     <owner/repo>    List tags for a repository
@@ -63,6 +69,7 @@ Commands:
   version                  Print version
 
 Examples:
+  releasewave serve
   releasewave releases golang/go
   releasewave latest kubernetes/kubernetes
   releasewave tags docker/compose
@@ -70,6 +77,58 @@ Examples:
 
 Configuration:
   ~/.config/releasewave/config.yaml`)
+}
+
+// cmdServe starts the MCP server.
+//
+// GO LEARNING: Signal Handling & Graceful Shutdown
+//   When you press Ctrl+C, the OS sends SIGINT to your process.
+//   We catch this signal to shut down the server gracefully (finish
+//   ongoing requests, close connections) instead of just dying.
+//
+//   signal.Notify(ch, signals...) sends signals to a channel.
+//   We use a goroutine (go func(){...}()) to listen for the signal
+//   in the background while the server runs in the foreground.
+func cmdServe() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Determine port
+	port := cfg.Server.Port
+	if port == 0 {
+		port = 7891
+	}
+	addr := fmt.Sprintf(":%d", port)
+
+	srv := mcpserver.New(cfg)
+
+	// GO LEARNING: Goroutine for Signal Handling
+	//   go func() { ... }() starts a function in a new goroutine (lightweight thread).
+	//   This runs concurrently with the main goroutine.
+	//
+	//   make(chan os.Signal, 1) creates a buffered channel that can hold 1 signal.
+	//   Channels are Go's way of communicating between goroutines.
+	//   <-sigCh blocks until a value is received on the channel.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh // Block until we receive a signal
+		fmt.Printf("\nReceived %s, shutting down...\n", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		os.Exit(0)
+	}()
+
+	// This blocks until the server stops
+	if err := srv.Start(addr); err != nil {
+		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // parseOwnerRepo splits "owner/repo" into two strings.
