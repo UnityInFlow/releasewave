@@ -37,7 +37,6 @@ dockers:
   - image_templates:
       - "ghcr.io/unityinflow/releasewave:{{.Version}}"
       - "ghcr.io/unityinflow/releasewave:latest"
-    build_flag_templates:
-      - "--build-arg=VERSION={{.Version}}"
-      - "--build-arg=COMMIT={{.ShortCommit}}"
-      - "--build-arg=DATE={{.Date}}"
+    dockerfile: Dockerfile.goreleaser
+    goarch: amd64
+    goos: linux
