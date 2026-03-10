@@ -33,15 +33,15 @@ changelog:
       - "^test:"
       - "^ci:"
 
-brews:
-  - repository:
-      owner: UnityInFlow
-      name: homebrew-tap
-    homepage: "https://github.com/UnityInFlow/releasewave"
-    description: "Universal release/version aggregator for microservices with MCP server support"
-    license: "MIT"
-    test: |
-      system "#{bin}/releasewave", "version"
+# brews:
+#   - repository:
+#       owner: UnityInFlow
+#       name: homebrew-tap
+#     homepage: "https://github.com/UnityInFlow/releasewave"
+#     description: "Universal release/version aggregator for microservices with MCP server support"
+#     license: "MIT"
+#     test: |
+#       system "#{bin}/releasewave", "version"
 
 dockers:
   - image_templates:

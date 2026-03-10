@@ -22,17 +22,6 @@ func fakeOSVServer(t *testing.T) *httptest.Server {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		// Read request body to determine response
-		// For simplicity, we distinguish test cases by using a custom header
-		testCase := r.Header.Get("X-Test-Case")
-		if testCase == "" {
-			// Default: return vulnerabilities based on content-type presence
-			// In practice we parse the body. For tests, we use query params or
-			// different server instances. Let's use a single server with
-			// deterministic behavior by parsing the request body.
-		}
-
-		// We'll use the server for all test cases; the test will set baseURL.
 		// Return a response with vulnerabilities.
 		_, _ = w.Write([]byte(`{
 			"vulns": [
