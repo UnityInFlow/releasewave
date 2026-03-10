@@ -31,3 +31,8 @@ rate_limit:
 log:
   level: info    # debug, info, warn, error
   format: text   # text, json
+
+# Notifications
+notifications:
+  webhook_url: ""
+  enabled: false

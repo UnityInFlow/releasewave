@@ -17,7 +17,8 @@ var tagsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, repo := parseOwnerRepo(args[0])
-		client := getGitHubClient()
+		platform, _ := cmd.Flags().GetString("platform")
+		client := getProvider(platform)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -55,5 +56,6 @@ var tagsCmd = &cobra.Command{
 
 func init() {
 	tagsCmd.Flags().Bool("json", false, "output as JSON")
+	tagsCmd.Flags().String("platform", "github", "git platform (github, gitlab)")
 	rootCmd.AddCommand(tagsCmd)
 }

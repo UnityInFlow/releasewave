@@ -67,16 +67,22 @@
 - [x] `changelog_between_versions` — aggregate release notes
 - [x] `release_timeline` — cross-service release timeline
 - [x] `security_advisories` — CVE checking (OSV.dev API)
-- [ ] `dependency_matrix` — shared lib versions across services (future)
+- [x] `dependency_matrix` — shared lib versions across services
+- [x] `upgrade_plan` — suggest coordinated upgrades
+- [x] `get_repo_file` — fetch file content from repos
+- [x] `watch_releases` — detect new releases since last check
+- [x] `discover_services` — auto-discover from K8s annotations
 - [ ] `service_graph` — service communication map (future)
-- [ ] `upgrade_plan` — suggest coordinated upgrades (future)
 
-## Phase 8: Polish & Distribution
+## Phase 8: Polish & Distribution ✅
 - [ ] Documentation (usage, config, provider setup)
-- [ ] Homebrew formula
-- [ ] Docker image
-- [ ] Auto-discovery of services from K8s/ArgoCD
-- [ ] Web dashboard (optional, htmx or templ)
+- [x] Homebrew formula (Formula/releasewave.rb + GoReleaser brew tap)
+- [x] Docker image (Dockerfile.goreleaser + GHCR)
+- [x] Auto-discovery of services from K8s annotations
+- [x] Web dashboard (Go html/template, /dashboard endpoint)
+- [x] GitLab CLI support (--platform flag on all commands)
+- [x] Webhook notifications (JSON POST on new releases)
+- [x] Test suite (mcpserver, registry, security)
 
 ## Go Learning Milestones (mapped to phases)
 

@@ -61,6 +61,11 @@ func New(kubeconfig, kctx string) (*Client, error) {
 	return &Client{clientset: clientset, context: kctx}, nil
 }
 
+// Clientset returns the underlying Kubernetes clientset.
+func (c *Client) Clientset() *kubernetes.Clientset {
+	return c.clientset
+}
+
 // ListDeployments returns all deployments in a namespace (empty = all namespaces).
 func (c *Client) ListDeployments(ctx context.Context, namespace string) ([]DeployedService, error) {
 	slog.Debug("k8s.list_deployments", "namespace", namespace)

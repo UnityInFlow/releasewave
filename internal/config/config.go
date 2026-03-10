@@ -13,12 +13,19 @@ import (
 
 // Config is the top-level configuration.
 type Config struct {
-	Services  []ServiceConfig `yaml:"services"`
-	Cache     CacheConfig     `yaml:"cache"`
-	Server    ServerConfig    `yaml:"server"`
-	Tokens    TokenConfig     `yaml:"tokens"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Log       LogConfig       `yaml:"log"`
+	Services      []ServiceConfig    `yaml:"services"`
+	Cache         CacheConfig        `yaml:"cache"`
+	Server        ServerConfig       `yaml:"server"`
+	Tokens        TokenConfig        `yaml:"tokens"`
+	RateLimit     RateLimitConfig    `yaml:"rate_limit"`
+	Log           LogConfig          `yaml:"log"`
+	Notifications NotificationConfig `yaml:"notifications"`
+}
+
+// NotificationConfig controls release notifications.
+type NotificationConfig struct {
+	WebhookURL string `yaml:"webhook_url"`
+	Enabled    bool   `yaml:"enabled"`
 }
 
 // ServiceConfig defines a tracked microservice.
@@ -238,4 +245,9 @@ rate_limit:
 log:
   level: info    # debug, info, warn, error
   format: text   # text, json
+
+# Notifications
+notifications:
+  webhook_url: ""
+  enabled: false
 `

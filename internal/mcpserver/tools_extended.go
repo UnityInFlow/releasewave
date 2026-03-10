@@ -13,7 +13,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/UnityInFlow/releasewave/internal/config"
+	"github.com/UnityInFlow/releasewave/internal/discovery"
 	"github.com/UnityInFlow/releasewave/internal/k8s"
+	"github.com/UnityInFlow/releasewave/internal/notify"
 	"github.com/UnityInFlow/releasewave/internal/registry"
 	"github.com/UnityInFlow/releasewave/internal/security"
 )
@@ -92,6 +94,55 @@ func (s *Server) registerExtendedTools() {
 			mcp.WithNumber("days", mcp.Description("Number of days to look back")),
 		),
 		s.handleReleaseTimeline,
+	)
+
+	// ── Phase 8: Dependency & Upgrade Tools ──────────────────────────
+
+	s.mcp.AddTool(
+		mcp.NewTool("get_repo_file",
+			mcp.WithDescription("Fetch the contents of a file from a repository. Useful for reading dependency files like go.mod, package.json, or requirements.txt."),
+			mcp.WithString("owner", mcp.Description("Repository owner (org or user)"), mcp.Required()),
+			mcp.WithString("repo", mcp.Description("Repository name"), mcp.Required()),
+			mcp.WithString("path", mcp.Description("File path within the repository (e.g. go.mod, package.json)"), mcp.Required()),
+			mcp.WithString("platform", mcp.Description("Git platform"), mcp.Enum("github", "gitlab"), mcp.DefaultString("github")),
+		),
+		s.handleGetRepoFile,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("dependency_matrix",
+			mcp.WithDescription("Analyze shared dependencies across configured services by checking their go.mod, package.json, or requirements.txt files."),
+		),
+		s.handleDependencyMatrix,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("upgrade_plan",
+			mcp.WithDescription("Generate an upgrade plan for outdated services, suggesting an order based on release dates and semantic versioning."),
+			mcp.WithString("namespace", mcp.Description("Kubernetes namespace to check deployed versions"), mcp.DefaultString("default")),
+			mcp.WithString("kubeconfig", mcp.Description("Path to kubeconfig file"), mcp.DefaultString("")),
+			mcp.WithString("context", mcp.Description("Kubernetes context"), mcp.DefaultString("")),
+		),
+		s.handleUpgradePlan,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("watch_releases",
+			mcp.WithDescription("Check for new releases and send notifications for configured services."),
+		),
+		s.handleWatchReleases,
+	)
+
+	// ── Phase 9: Discovery Tools ─────────────────────────────────────
+
+	s.mcp.AddTool(
+		mcp.NewTool("discover_services",
+			mcp.WithDescription("Auto-discover services from a Kubernetes cluster using annotations or image names."),
+			mcp.WithString("namespace", mcp.Description("Kubernetes namespace (empty for all namespaces)"), mcp.DefaultString("")),
+			mcp.WithString("kubeconfig", mcp.Description("Path to kubeconfig file (default: ~/.kube/config)"), mcp.DefaultString("")),
+			mcp.WithString("context", mcp.Description("Kubernetes context to use (default: current context)"), mcp.DefaultString("")),
+		),
+		s.handleDiscoverServices,
 	)
 }
 
@@ -426,6 +477,383 @@ func (s *Server) handleReleaseTimeline(ctx context.Context, request mcp.CallTool
 		"period":   fmt.Sprintf("last %d days", days),
 		"total":    len(entries),
 		"timeline": entries,
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// ── Phase 8: Dependency & Upgrade Handlers ───────────────────────────
+
+func (s *Server) handleGetRepoFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := request.GetString("owner", "")
+	repo := request.GetString("repo", "")
+	path := request.GetString("path", "")
+	platform := request.GetString("platform", "github")
+	slog.Info("tool.call", "tool", "get_repo_file", "owner", owner, "repo", repo, "path", path, "platform", platform)
+
+	if owner == "" || repo == "" || path == "" {
+		return mcp.NewToolResultError("owner, repo, and path are required"), nil
+	}
+
+	p, err := s.getProvider(platform)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	content, err := p.GetFileContent(ctx, owner, repo, path)
+	if err != nil {
+		slog.Error("tool.error", "tool", "get_repo_file", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("failed to get file: %v", err)), nil
+	}
+
+	result := map[string]any{
+		"repository": fmt.Sprintf("%s/%s", owner, repo),
+		"path":       path,
+		"platform":   platform,
+		"content":    string(content),
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// depFiles are the standard dependency file names to look for.
+var depFiles = []string{"go.mod", "package.json", "requirements.txt"}
+
+func (s *Server) handleDependencyMatrix(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Info("tool.call", "tool", "dependency_matrix")
+
+	if len(s.config.Services) == 0 {
+		return mcp.NewToolResultText("No services configured."), nil
+	}
+
+	type depInfo struct {
+		Service  string `json:"service"`
+		File     string `json:"file"`
+		Content  string `json:"content,omitempty"`
+		Error    string `json:"error,omitempty"`
+		Platform string `json:"platform"`
+	}
+
+	var mu sync.Mutex
+	var results []depInfo
+	var wg sync.WaitGroup
+
+	for _, svc := range s.config.Services {
+		wg.Add(1)
+		go func(svc config.ServiceConfig) {
+			defer wg.Done()
+
+			parsed, err := config.ParseRepo(svc.Repo)
+			if err != nil {
+				mu.Lock()
+				results = append(results, depInfo{Service: svc.Name, Error: err.Error()})
+				mu.Unlock()
+				return
+			}
+
+			p, err := s.getProvider(parsed.Platform)
+			if err != nil {
+				mu.Lock()
+				results = append(results, depInfo{Service: svc.Name, Platform: parsed.Platform, Error: err.Error()})
+				mu.Unlock()
+				return
+			}
+
+			for _, file := range depFiles {
+				content, err := p.GetFileContent(ctx, parsed.Owner, parsed.RepoName, file)
+				if err != nil {
+					continue // File doesn't exist, try next
+				}
+
+				// Truncate large files to keep response manageable
+				text := string(content)
+				if len(text) > 5000 {
+					text = text[:4997] + "..."
+				}
+
+				mu.Lock()
+				results = append(results, depInfo{
+					Service:  svc.Name,
+					File:     file,
+					Content:  text,
+					Platform: parsed.Platform,
+				})
+				mu.Unlock()
+				break // Found a dep file, skip remaining
+			}
+		}(svc)
+	}
+
+	wg.Wait()
+
+	// Sort results by service name for consistent output
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Service < results[j].Service
+	})
+
+	output := map[string]any{
+		"services":         len(s.config.Services),
+		"dependency_files": depFiles,
+		"results":          results,
+	}
+
+	data, _ := json.MarshalIndent(output, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleUpgradePlan(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	namespace := request.GetString("namespace", "default")
+	kubeconfig := request.GetString("kubeconfig", "")
+	kctx := request.GetString("context", "")
+	slog.Info("tool.call", "tool", "upgrade_plan", "namespace", namespace)
+
+	if len(s.config.Services) == 0 {
+		return mcp.NewToolResultText("No services configured."), nil
+	}
+
+	// Try to get deployed versions from K8s (optional — may fail if no cluster)
+	deployedVersions := make(map[string]string)
+	k8sClient, err := k8s.New(kubeconfig, kctx)
+	if err == nil {
+		deployed, err := k8sClient.ListAll(ctx, namespace)
+		if err == nil {
+			for _, d := range deployed {
+				deployedVersions[d.Name] = d.AppVersion
+			}
+		}
+	}
+
+	type upgradePlanEntry struct {
+		Service         string `json:"service"`
+		Platform        string `json:"platform"`
+		LatestRelease   string `json:"latest_release"`
+		ReleaseDate     string `json:"release_date"`
+		DeployedVersion string `json:"deployed_version,omitempty"`
+		UpToDate        bool   `json:"up_to_date"`
+		Priority        string `json:"priority"` // critical, high, medium, low
+		Action          string `json:"action"`
+		Error           string `json:"error,omitempty"`
+	}
+
+	entries := make([]upgradePlanEntry, len(s.config.Services))
+	var wg sync.WaitGroup
+
+	for i, svc := range s.config.Services {
+		wg.Add(1)
+		go func(idx int, svc config.ServiceConfig) {
+			defer wg.Done()
+
+			parsed, err := config.ParseRepo(svc.Repo)
+			if err != nil {
+				entries[idx] = upgradePlanEntry{Service: svc.Name, Error: err.Error()}
+				return
+			}
+
+			p, err := s.getProvider(parsed.Platform)
+			if err != nil {
+				entries[idx] = upgradePlanEntry{Service: svc.Name, Platform: parsed.Platform, Error: err.Error()}
+				return
+			}
+
+			release, err := p.GetLatestRelease(ctx, parsed.Owner, parsed.RepoName)
+			if err != nil {
+				entries[idx] = upgradePlanEntry{Service: svc.Name, Platform: parsed.Platform, Error: err.Error()}
+				return
+			}
+
+			deployedVer := deployedVersions[svc.Name]
+			upToDate := deployedVer != "" && (deployedVer == release.Tag || "v"+deployedVer == release.Tag || deployedVer == strings.TrimPrefix(release.Tag, "v"))
+
+			// Determine priority based on release age and version gap
+			priority := "low"
+			action := "No action needed"
+			if !upToDate {
+				age := time.Since(release.PublishedAt)
+				switch {
+				case strings.Contains(strings.ToLower(release.Name), "security") || strings.Contains(strings.ToLower(release.Body), "cve"):
+					priority = "critical"
+					action = fmt.Sprintf("Security update available: upgrade to %s immediately", release.Tag)
+				case age < 24*time.Hour:
+					priority = "medium"
+					action = fmt.Sprintf("New release available: upgrade to %s", release.Tag)
+				case age < 7*24*time.Hour:
+					priority = "medium"
+					action = fmt.Sprintf("Recent release available: upgrade to %s", release.Tag)
+				case deployedVer == "":
+					priority = "high"
+					action = fmt.Sprintf("Deployed version unknown; latest is %s", release.Tag)
+				default:
+					priority = "high"
+					action = fmt.Sprintf("Outdated: upgrade from %s to %s", deployedVer, release.Tag)
+				}
+			}
+
+			entries[idx] = upgradePlanEntry{
+				Service:         svc.Name,
+				Platform:        parsed.Platform,
+				LatestRelease:   release.Tag,
+				ReleaseDate:     release.PublishedAt.Format("2006-01-02"),
+				DeployedVersion: deployedVer,
+				UpToDate:        upToDate,
+				Priority:        priority,
+				Action:          action,
+			}
+		}(i, svc)
+	}
+
+	wg.Wait()
+
+	// Sort by priority: critical > high > medium > low
+	priorityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+	sort.Slice(entries, func(i, j int) bool {
+		pi := priorityOrder[entries[i].Priority]
+		pj := priorityOrder[entries[j].Priority]
+		if pi != pj {
+			return pi < pj
+		}
+		return entries[i].ReleaseDate < entries[j].ReleaseDate // Older releases first within same priority
+	})
+
+	result := map[string]any{
+		"total_services": len(entries),
+		"namespace":      namespace,
+		"upgrade_plan":   entries,
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleWatchReleases(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Info("tool.call", "tool", "watch_releases")
+
+	if len(s.config.Services) == 0 {
+		return mcp.NewToolResultText("No services configured."), nil
+	}
+
+	type watchResult struct {
+		Service  string `json:"service"`
+		Platform string `json:"platform"`
+		Latest   string `json:"latest_release"`
+		URL      string `json:"url"`
+		Notified bool   `json:"notified"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	// Build a notifier if configured
+	var notifier notify.Notifier
+	if s.config.Notifications.Enabled && s.config.Notifications.WebhookURL != "" {
+		notifier = notify.NewWebhookNotifier(s.config.Notifications.WebhookURL)
+	}
+
+	results := make([]watchResult, len(s.config.Services))
+	var wg sync.WaitGroup
+
+	s.mu.Lock()
+	if s.lastKnownVersions == nil {
+		s.lastKnownVersions = make(map[string]string)
+	}
+	s.mu.Unlock()
+
+	for i, svc := range s.config.Services {
+		wg.Add(1)
+		go func(idx int, svc config.ServiceConfig) {
+			defer wg.Done()
+
+			parsed, err := config.ParseRepo(svc.Repo)
+			if err != nil {
+				results[idx] = watchResult{Service: svc.Name, Error: err.Error()}
+				return
+			}
+
+			p, err := s.getProvider(parsed.Platform)
+			if err != nil {
+				results[idx] = watchResult{Service: svc.Name, Platform: parsed.Platform, Error: err.Error()}
+				return
+			}
+
+			release, err := p.GetLatestRelease(ctx, parsed.Owner, parsed.RepoName)
+			if err != nil {
+				results[idx] = watchResult{Service: svc.Name, Platform: parsed.Platform, Error: err.Error()}
+				return
+			}
+
+			s.mu.Lock()
+			oldVersion := s.lastKnownVersions[svc.Name]
+			isNew := oldVersion != "" && oldVersion != release.Tag
+			s.lastKnownVersions[svc.Name] = release.Tag
+			s.mu.Unlock()
+
+			notified := false
+			if isNew && notifier != nil {
+				event := notify.Event{
+					ServiceName: svc.Name,
+					OldVersion:  oldVersion,
+					NewVersion:  release.Tag,
+					ReleaseURL:  release.HTMLURL,
+					Platform:    parsed.Platform,
+				}
+				if err := notifier.Notify(ctx, event); err != nil {
+					slog.Error("notify.error", "service", svc.Name, "error", err)
+				} else {
+					notified = true
+				}
+			}
+
+			results[idx] = watchResult{
+				Service:  svc.Name,
+				Platform: parsed.Platform,
+				Latest:   release.Tag,
+				URL:      release.HTMLURL,
+				Notified: notified,
+			}
+		}(i, svc)
+	}
+
+	wg.Wait()
+
+	newReleases := 0
+	for _, r := range results {
+		if r.Notified {
+			newReleases++
+		}
+	}
+
+	output := map[string]any{
+		"services":         len(results),
+		"new_releases":     newReleases,
+		"notifications_on": s.config.Notifications.Enabled,
+		"results":          results,
+	}
+
+	data, _ := json.MarshalIndent(output, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// ── Phase 9: Discovery Handlers ──────────────────────────────────────
+
+func (s *Server) handleDiscoverServices(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	namespace := request.GetString("namespace", "")
+	kubeconfig := request.GetString("kubeconfig", "")
+	kctx := request.GetString("context", "")
+	slog.Info("tool.call", "tool", "discover_services", "namespace", namespace)
+
+	discoverer := discovery.NewK8sDiscoverer(kubeconfig, kctx, namespace)
+	services, err := discoverer.Discover(ctx)
+	if err != nil {
+		slog.Error("tool.error", "tool", "discover_services", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("discovery failed: %v", err)), nil
+	}
+
+	if len(services) == 0 {
+		return mcp.NewToolResultText("No services discovered."), nil
+	}
+
+	result := map[string]any{
+		"discovered": len(services),
+		"services":   services,
 	}
 
 	data, _ := json.MarshalIndent(result, "", "  ")

@@ -58,3 +58,16 @@ func (p *CachedProvider) ListTags(ctx context.Context, owner, repo string) ([]mo
 	p.cache.Set(key, tags)
 	return tags, nil
 }
+
+func (p *CachedProvider) GetFileContent(ctx context.Context, owner, repo, path string) ([]byte, error) {
+	key := cache.Key(p.inner.Name(), "file", owner, repo, path)
+	if v, ok := p.cache.Get(key); ok {
+		return v.([]byte), nil
+	}
+	content, err := p.inner.GetFileContent(ctx, owner, repo, path)
+	if err != nil {
+		return nil, err
+	}
+	p.cache.Set(key, content)
+	return content, nil
+}

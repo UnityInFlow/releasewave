@@ -16,7 +16,8 @@ var latestCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, repo := parseOwnerRepo(args[0])
-		client := getGitHubClient()
+		platform, _ := cmd.Flags().GetString("platform")
+		client := getProvider(platform)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -54,5 +55,6 @@ var latestCmd = &cobra.Command{
 
 func init() {
 	latestCmd.Flags().Bool("json", false, "output as JSON")
+	latestCmd.Flags().String("platform", "github", "git platform (github, gitlab)")
 	rootCmd.AddCommand(latestCmd)
 }

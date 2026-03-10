@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -21,10 +22,12 @@ import (
 
 // Server wraps the MCP server and its dependencies.
 type Server struct {
-	mcp       *server.MCPServer
-	sse       *server.SSEServer
-	config    *config.Config
-	providers map[string]provider.Provider
+	mcp               *server.MCPServer
+	sse               *server.SSEServer
+	config            *config.Config
+	providers         map[string]provider.Provider
+	mu                sync.Mutex
+	lastKnownVersions map[string]string
 }
 
 // New creates a new ReleaseWave MCP server with all tools registered.
@@ -327,6 +330,20 @@ func (s *Server) Start(addr string) error {
 	return s.sse.Start(addr)
 }
 
+// StartWithHandlers starts the MCP server and also registers additional HTTP handlers.
+func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Handler) error {
+	s.sse = server.NewSSEServer(s.mcp,
+		server.WithBaseURL(fmt.Sprintf("http://localhost%s", addr)),
+	)
+
+	for pattern, handler := range extraHandlers {
+		http.Handle(pattern, handler)
+	}
+
+	slog.Info("server.start", "transport", "sse", "addr", addr)
+	return s.sse.Start(addr)
+}
+
 // Shutdown gracefully stops the SSE server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.sse != nil {
@@ -340,6 +357,16 @@ func (s *Server) MCPServer() *server.MCPServer {
 	return s.mcp
 }
 
+// Config returns the server's configuration.
+func (s *Server) Config() *config.Config {
+	return s.config
+}
+
+// Providers returns the server's provider map.
+func (s *Server) Providers() map[string]provider.Provider {
+	return s.providers
+}
+
 // Info returns a summary for display.
 func (s *Server) Info() string {
 	var b strings.Builder
@@ -347,7 +374,8 @@ func (s *Server) Info() string {
 	b.WriteString("Tools: list_releases, get_latest_release, list_tags, check_services, find_outdated,\n")
 	b.WriteString("       list_image_tags, compare_image_tags, list_k8s_deployments,\n")
 	b.WriteString("       compare_release_vs_deployed, changelog_between_versions,\n")
-	b.WriteString("       security_advisories, release_timeline\n")
+	b.WriteString("       security_advisories, release_timeline, get_repo_file,\n")
+	b.WriteString("       dependency_matrix, upgrade_plan, watch_releases, discover_services\n")
 	b.WriteString("Providers: github, gitlab\n")
 	b.WriteString(fmt.Sprintf("Services configured: %d\n", len(s.config.Services)))
 	return b.String()

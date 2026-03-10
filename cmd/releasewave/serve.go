@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/UnityInFlow/releasewave/internal/mcpserver"
+	"github.com/UnityInFlow/releasewave/internal/web"
 )
 
 var serveCmd = &cobra.Command{
@@ -47,7 +49,13 @@ var serveCmd = &cobra.Command{
 			}()
 
 			fmt.Fprintln(os.Stderr, srv.Info())
-			return srv.Start(addr)
+			fmt.Fprintf(os.Stderr, "Dashboard: http://localhost%s/dashboard\n", addr)
+
+			// Serve the web dashboard on the same port alongside the MCP SSE endpoints.
+			dashboard := web.Handler(srv.Config(), srv.Providers())
+			return srv.StartWithHandlers(addr, map[string]http.Handler{
+				"/dashboard": dashboard,
+			})
 
 		default:
 			return fmt.Errorf("unknown transport %q (supported: stdio, sse)", transport)

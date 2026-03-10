@@ -27,4 +27,7 @@ type Provider interface {
 
 	// ListTags returns all tags for a repository.
 	ListTags(ctx context.Context, owner, repo string) ([]model.Tag, error)
+
+	// GetFileContent fetches the contents of a file from a repository at the default branch.
+	GetFileContent(ctx context.Context, owner, repo, path string) ([]byte, error)
 }

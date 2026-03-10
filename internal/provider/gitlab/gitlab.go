@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -141,6 +142,35 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]model.Tag,
 
 	slog.Debug("gitlab.list_tags", "owner", owner, "repo", repo, "count", len(tags))
 	return tags, nil
+}
+
+func (c *Client) GetFileContent(ctx context.Context, owner, repo, path string) ([]byte, error) {
+	project := projectPath(owner, repo)
+	encodedPath := url.PathEscape(path)
+	apiURL := fmt.Sprintf("%s/projects/%s/repository/files/%s?ref=HEAD", c.baseURL, project, encodedPath)
+
+	body, err := c.doRequest(ctx, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("get file content: %w", err)
+	}
+
+	var fileResp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &fileResp); err != nil {
+		return nil, fmt.Errorf("parse file response: %w", err)
+	}
+
+	if fileResp.Encoding == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(fileResp.Content)
+		if err != nil {
+			return nil, fmt.Errorf("decode base64 content: %w", err)
+		}
+		return decoded, nil
+	}
+
+	return []byte(fileResp.Content), nil
 }
 
 func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
