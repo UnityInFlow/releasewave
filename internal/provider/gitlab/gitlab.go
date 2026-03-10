@@ -28,7 +28,7 @@ type Client struct {
 // Option configures a Client.
 type Option func(*Client)
 
-func WithBaseURL(url string) Option     { return func(c *Client) { c.baseURL = url } }
+func WithBaseURL(url string) Option               { return func(c *Client) { c.baseURL = url } }
 func WithRateLimiter(l *ratelimit.Limiter) Option { return func(c *Client) { c.limiter = l } }
 
 // New creates a new GitLab client.
