@@ -41,7 +41,7 @@ func New() *Client {
 // osvQueryRequest is the JSON body for OSV API queries.
 type osvQueryRequest struct {
 	Package *osvPackage `json:"package,omitempty"`
-	Version string     `json:"version,omitempty"`
+	Version string      `json:"version,omitempty"`
 }
 
 type osvPackage struct {
@@ -55,12 +55,12 @@ type osvQueryResponse struct {
 }
 
 type osvVuln struct {
-	ID       string        `json:"id"`
-	Summary  string        `json:"summary"`
-	Aliases  []string      `json:"aliases"`
-	Severity []osvSeverity `json:"severity"`
-	Affected []osvAffected `json:"affected"`
-	References []osvRef    `json:"references"`
+	ID         string        `json:"id"`
+	Summary    string        `json:"summary"`
+	Aliases    []string      `json:"aliases"`
+	Severity   []osvSeverity `json:"severity"`
+	Affected   []osvAffected `json:"affected"`
+	References []osvRef      `json:"references"`
 }
 
 type osvSeverity struct {
@@ -73,8 +73,8 @@ type osvAffected struct {
 }
 
 type osvRange struct {
-	Type   string      `json:"type"`
-	Events []osvEvent  `json:"events"`
+	Type   string     `json:"type"`
+	Events []osvEvent `json:"events"`
 }
 
 type osvEvent struct {

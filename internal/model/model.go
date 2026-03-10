@@ -31,7 +31,7 @@ type Service struct {
 	Repo     string `json:"repo" yaml:"repo"`         // e.g. "github.com/org/repo"
 	Registry string `json:"registry" yaml:"registry"` // e.g. "ghcr.io/org/repo"
 	Platform string `json:"platform" yaml:"platform"` // "github", "gitlab", etc.
-	Owner    string `json:"owner" yaml:"owner"`        // org or user
+	Owner    string `json:"owner" yaml:"owner"`       // org or user
 	RepoName string `json:"repo_name" yaml:"repo_name"`
 }
 

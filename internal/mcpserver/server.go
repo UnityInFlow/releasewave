@@ -348,7 +348,7 @@ func (s *Server) Info() string {
 	b.WriteString("       list_image_tags, compare_image_tags, list_k8s_deployments,\n")
 	b.WriteString("       compare_release_vs_deployed, changelog_between_versions,\n")
 	b.WriteString("       security_advisories, release_timeline\n")
-	b.WriteString(fmt.Sprintf("Providers: github, gitlab\n"))
+	b.WriteString("Providers: github, gitlab\n")
 	b.WriteString(fmt.Sprintf("Services configured: %d\n", len(s.config.Services)))
 	return b.String()
 }

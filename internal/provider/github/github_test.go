@@ -14,7 +14,7 @@ func fakeGitHubServer(t *testing.T) *httptest.Server {
 		switch r.URL.Path {
 		case "/repos/testorg/testrepo/releases":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[
+			_, _ = w.Write([]byte(`[
 				{
 					"tag_name": "v2.0.0",
 					"name": "Version 2.0",
@@ -37,7 +37,7 @@ func fakeGitHubServer(t *testing.T) *httptest.Server {
 
 		case "/repos/testorg/testrepo/releases/latest":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"tag_name": "v2.0.0",
 				"name": "Version 2.0",
 				"body": "Major release with breaking changes",
@@ -49,14 +49,14 @@ func fakeGitHubServer(t *testing.T) *httptest.Server {
 
 		case "/repos/testorg/testrepo/tags":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[
+			_, _ = w.Write([]byte(`[
 				{"name": "v2.0.0", "commit": {"sha": "abc123def456"}},
 				{"name": "v1.0.0", "commit": {"sha": "789xyz000111"}}
 			]`))
 
 		case "/repos/testorg/empty/releases":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`[]`))
 
 		case "/repos/testorg/broken/releases":
 			w.WriteHeader(http.StatusInternalServerError)

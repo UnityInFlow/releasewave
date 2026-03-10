@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/UnityInFlow/releasewave/internal/config"
+	"github.com/UnityInFlow/releasewave/internal/provider"
 	gh "github.com/UnityInFlow/releasewave/internal/provider/github"
 	gl "github.com/UnityInFlow/releasewave/internal/provider/gitlab"
-	"github.com/UnityInFlow/releasewave/internal/provider"
 	"github.com/UnityInFlow/releasewave/internal/ratelimit"
 )
 

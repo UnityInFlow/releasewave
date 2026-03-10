@@ -21,7 +21,7 @@ var versionCmd = &cobra.Command{
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(info)
+			_ = enc.Encode(info)
 			return
 		}
 		fmt.Printf("releasewave %s (commit: %s, built: %s)\n", version, commit, date)

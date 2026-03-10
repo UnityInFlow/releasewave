@@ -20,7 +20,7 @@ func fakeGitLabServer(t *testing.T) *httptest.Server {
 		case "/projects/testorg%2Ftestrepo/releases",
 			"/projects/testorg/testrepo/releases":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[
+			_, _ = w.Write([]byte(`[
 				{
 					"tag_name": "v3.0.0",
 					"name": "Version 3.0",
@@ -42,7 +42,7 @@ func fakeGitLabServer(t *testing.T) *httptest.Server {
 		case "/projects/testorg%2Ftestrepo/repository/tags",
 			"/projects/testorg/testrepo/repository/tags":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[
+			_, _ = w.Write([]byte(`[
 				{"name": "v3.0.0", "commit": {"id": "aabbccdd11223344"}},
 				{"name": "v2.0.0", "commit": {"id": "55667788aabbccdd"}}
 			]`))
@@ -50,7 +50,7 @@ func fakeGitLabServer(t *testing.T) *httptest.Server {
 		case "/projects/testorg%2Fempty/releases",
 			"/projects/testorg/empty/releases":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`[]`))
 
 		case "/projects/testorg%2Fbroken/releases",
 			"/projects/testorg/broken/releases":
