@@ -336,12 +336,22 @@ func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Ha
 		server.WithBaseURL(fmt.Sprintf("http://localhost%s", addr)),
 	)
 
+	// Build a mux that serves both the extra handlers and the SSE server.
+	mux := http.NewServeMux()
 	for pattern, handler := range extraHandlers {
-		http.Handle(pattern, handler)
+		mux.Handle(pattern+"/", http.StripPrefix(pattern, handler))
+		mux.Handle(pattern, handler)
+	}
+	// Fall through to SSE server for MCP endpoints.
+	mux.Handle("/", s.sse)
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: mux,
 	}
 
 	slog.Info("server.start", "transport", "sse", "addr", addr)
-	return s.sse.Start(addr)
+	return srv.ListenAndServe()
 }
 
 // Shutdown gracefully stops the SSE server.
