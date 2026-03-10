@@ -133,6 +133,13 @@ func (s *Server) registerExtendedTools() {
 		s.handleWatchReleases,
 	)
 
+	s.mcp.AddTool(
+		mcp.NewTool("service_graph",
+			mcp.WithDescription("Build a dependency graph of configured services by analyzing their dependency files. Shows which services share common libraries and their versions."),
+		),
+		s.handleServiceGraph,
+	)
+
 	// ── Phase 9: Discovery Tools ─────────────────────────────────────
 
 	s.mcp.AddTool(
@@ -830,6 +837,224 @@ func (s *Server) handleWatchReleases(ctx context.Context, request mcp.CallToolRe
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+// ── Service Graph Handler ────────────────────────────────────────────
+
+func (s *Server) handleServiceGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Info("tool.call", "tool", "service_graph")
+
+	if len(s.config.Services) == 0 {
+		return mcp.NewToolResultText("No services configured."), nil
+	}
+
+	// Fetch dependency files for all services concurrently.
+	type svcDeps struct {
+		Name     string
+		Platform string
+		File     string
+		Deps     map[string]string // dependency name → version
+		Error    string
+	}
+
+	results := make([]svcDeps, len(s.config.Services))
+	var wg sync.WaitGroup
+
+	for i, svc := range s.config.Services {
+		wg.Add(1)
+		go func(idx int, svc config.ServiceConfig) {
+			defer wg.Done()
+
+			parsed, err := config.ParseRepo(svc.Repo)
+			if err != nil {
+				results[idx] = svcDeps{Name: svc.Name, Error: err.Error()}
+				return
+			}
+
+			p, err := s.getProvider(parsed.Platform)
+			if err != nil {
+				results[idx] = svcDeps{Name: svc.Name, Platform: parsed.Platform, Error: err.Error()}
+				return
+			}
+
+			for _, file := range depFiles {
+				content, err := p.GetFileContent(ctx, parsed.Owner, parsed.RepoName, file)
+				if err != nil {
+					continue
+				}
+				deps := parseDeps(file, string(content))
+				results[idx] = svcDeps{
+					Name:     svc.Name,
+					Platform: parsed.Platform,
+					File:     file,
+					Deps:     deps,
+				}
+				return
+			}
+			results[idx] = svcDeps{Name: svc.Name, Platform: parsed.Platform, Error: "no dependency file found"}
+		}(i, svc)
+	}
+
+	wg.Wait()
+
+	// Build the graph: for each dependency, list which services use it.
+	depToServices := make(map[string][]map[string]string) // dep → [{service, version}, ...]
+	for _, r := range results {
+		for dep, ver := range r.Deps {
+			depToServices[dep] = append(depToServices[dep], map[string]string{
+				"service": r.Name,
+				"version": ver,
+			})
+		}
+	}
+
+	// Filter to only shared dependencies (used by 2+ services).
+	shared := make(map[string][]map[string]string)
+	for dep, svcs := range depToServices {
+		if len(svcs) >= 2 {
+			shared[dep] = svcs
+		}
+	}
+
+	// Build edges: pairs of services that share at least one dependency.
+	type edge struct {
+		Service1   string   `json:"service1"`
+		Service2   string   `json:"service2"`
+		SharedDeps []string `json:"shared_deps"`
+	}
+
+	edgeMap := make(map[string]*edge)
+	for dep, svcs := range shared {
+		for i := 0; i < len(svcs); i++ {
+			for j := i + 1; j < len(svcs); j++ {
+				s1, s2 := svcs[i]["service"], svcs[j]["service"]
+				if s1 > s2 {
+					s1, s2 = s2, s1
+				}
+				key := s1 + "|" + s2
+				if e, ok := edgeMap[key]; ok {
+					e.SharedDeps = append(e.SharedDeps, dep)
+				} else {
+					edgeMap[key] = &edge{
+						Service1:   s1,
+						Service2:   s2,
+						SharedDeps: []string{dep},
+					}
+				}
+			}
+		}
+	}
+
+	edges := make([]edge, 0, len(edgeMap))
+	for _, e := range edgeMap {
+		sort.Strings(e.SharedDeps)
+		edges = append(edges, *e)
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		return len(edges[i].SharedDeps) > len(edges[j].SharedDeps)
+	})
+
+	// Build service node summaries.
+	type node struct {
+		Name     string `json:"name"`
+		Platform string `json:"platform"`
+		DepFile  string `json:"dep_file,omitempty"`
+		DepCount int    `json:"dep_count"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	nodes := make([]node, 0, len(results))
+	for _, r := range results {
+		nodes = append(nodes, node{
+			Name:     r.Name,
+			Platform: r.Platform,
+			DepFile:  r.File,
+			DepCount: len(r.Deps),
+			Error:    r.Error,
+		})
+	}
+
+	output := map[string]any{
+		"services":            len(nodes),
+		"shared_deps":         len(shared),
+		"service_connections": len(edges),
+		"nodes":               nodes,
+		"edges":               edges,
+		"shared_libraries":    shared,
+	}
+
+	data, _ := json.MarshalIndent(output, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// parseDeps extracts dependency name→version pairs from common dependency files.
+func parseDeps(filename, content string) map[string]string {
+	deps := make(map[string]string)
+
+	switch filename {
+	case "go.mod":
+		// Parse "require" blocks and single requires.
+		inRequire := false
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "require (" {
+				inRequire = true
+				continue
+			}
+			if inRequire && line == ")" {
+				inRequire = false
+				continue
+			}
+			if inRequire {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 && !strings.HasPrefix(parts[0], "//") {
+					deps[parts[0]] = parts[1]
+				}
+			}
+			if strings.HasPrefix(line, "require ") && !strings.Contains(line, "(") {
+				parts := strings.Fields(line)
+				if len(parts) >= 3 {
+					deps[parts[1]] = parts[2]
+				}
+			}
+		}
+
+	case "package.json":
+		// Parse JSON dependencies and devDependencies.
+		var pkg struct {
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
+		}
+		if err := json.Unmarshal([]byte(content), &pkg); err == nil {
+			for k, v := range pkg.Dependencies {
+				deps[k] = v
+			}
+			for k, v := range pkg.DevDependencies {
+				deps[k] = v
+			}
+		}
+
+	case "requirements.txt":
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			// Handle name==version, name>=version, name~=version
+			for _, sep := range []string{"==", ">=", "<=", "~=", "!="} {
+				if idx := strings.Index(line, sep); idx > 0 {
+					deps[line[:idx]] = line[idx:]
+					break
+				}
+			}
+			// Plain package name without version
+			if _, ok := deps[line]; !ok && !strings.ContainsAny(line, "=<>~!") {
+				deps[line] = "*"
+			}
+		}
+	}
+
+	return deps
 }
 
 // ── Phase 9: Discovery Handlers ──────────────────────────────────────

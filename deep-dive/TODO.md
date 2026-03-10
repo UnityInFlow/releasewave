@@ -72,7 +72,7 @@
 - [x] `get_repo_file` — fetch file content from repos
 - [x] `watch_releases` — detect new releases since last check
 - [x] `discover_services` — auto-discover from K8s annotations
-- [ ] `service_graph` — service communication map (future)
+- [x] `service_graph` — service dependency graph from dependency files
 
 ## Phase 8: Polish & Distribution ✅
 - [ ] Documentation (usage, config, provider setup)
