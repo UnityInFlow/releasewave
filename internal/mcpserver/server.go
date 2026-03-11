@@ -338,6 +338,13 @@ func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Ha
 
 	// Build a mux that serves both the extra handlers and the SSE server.
 	mux := http.NewServeMux()
+
+	// Health endpoint for monitoring.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	for pattern, handler := range extraHandlers {
 		mux.Handle(pattern+"/", http.StripPrefix(pattern, handler))
 		mux.Handle(pattern, handler)

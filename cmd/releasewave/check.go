@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -80,6 +81,24 @@ var checkCmd = &cobra.Command{
 
 		wg.Wait()
 
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+		if jsonFlag {
+			type jsonResult struct {
+				Name     string `json:"name"`
+				Platform string `json:"platform"`
+				Latest   string `json:"latest_release"`
+				URL      string `json:"url,omitempty"`
+				Error    string `json:"error,omitempty"`
+			}
+			out := make([]jsonResult, len(results))
+			for i, r := range results {
+				out[i] = jsonResult{Name: r.name, Platform: r.platform, Latest: r.tag, URL: r.url, Error: r.err}
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintf(w, "SERVICE\tPLATFORM\tLATEST\tURL\n")
 		fmt.Fprintf(w, "-------\t--------\t------\t---\n")
@@ -95,5 +114,6 @@ var checkCmd = &cobra.Command{
 }
 
 func init() {
+	checkCmd.Flags().Bool("json", false, "output as JSON")
 	rootCmd.AddCommand(checkCmd)
 }
