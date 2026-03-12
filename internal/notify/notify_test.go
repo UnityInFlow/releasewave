@@ -96,3 +96,68 @@ func TestWebhookNotifier_CancelledContext(t *testing.T) {
 		t.Fatal("expected error for cancelled context, got nil")
 	}
 }
+
+func TestWebhookNotifier_HTTP403(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	notifier := NewWebhookNotifier(srv.URL)
+	err := notifier.Notify(context.Background(), Event{ServiceName: "api", NewVersion: "v1.0.0"})
+	if err == nil {
+		t.Fatal("expected error for 403 response")
+	}
+}
+
+func TestWebhookNotifier_AllFieldsSent(t *testing.T) {
+	var received Event
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	notifier := NewWebhookNotifier(srv.URL)
+	event := Event{
+		ServiceName: "billing-service",
+		OldVersion:  "v3.2.1",
+		NewVersion:  "v4.0.0",
+		ReleaseURL:  "https://github.com/org/billing/releases/tag/v4.0.0",
+		Platform:    "gitlab",
+	}
+
+	if err := notifier.Notify(context.Background(), event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if received.ServiceName != event.ServiceName {
+		t.Errorf("service = %q, want %q", received.ServiceName, event.ServiceName)
+	}
+	if received.OldVersion != event.OldVersion {
+		t.Errorf("old_version = %q, want %q", received.OldVersion, event.OldVersion)
+	}
+	if received.NewVersion != event.NewVersion {
+		t.Errorf("new_version = %q, want %q", received.NewVersion, event.NewVersion)
+	}
+	if received.ReleaseURL != event.ReleaseURL {
+		t.Errorf("release_url = %q, want %q", received.ReleaseURL, event.ReleaseURL)
+	}
+	if received.Platform != event.Platform {
+		t.Errorf("platform = %q, want %q", received.Platform, event.Platform)
+	}
+}
+
+func TestNewWebhookNotifier_SetsURL(t *testing.T) {
+	url := "https://example.com/webhook"
+	n := NewWebhookNotifier(url)
+	if n.url != url {
+		t.Errorf("url = %q, want %q", n.url, url)
+	}
+	if n.httpClient == nil {
+		t.Error("httpClient should not be nil")
+	}
+}
