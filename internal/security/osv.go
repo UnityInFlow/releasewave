@@ -198,7 +198,10 @@ func (c *Client) QueryByGitCommit(ctx context.Context, repoURL, commitHash strin
 		return nil, fmt.Errorf("osv commit query: HTTP %d", resp.StatusCode)
 	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read commit response: %w", err)
+	}
 	var osvResp osvQueryResponse
 	if err := json.Unmarshal(respBody, &osvResp); err != nil {
 		return nil, err
