@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -38,6 +39,15 @@ func (m *mockProvider) GetFileContent(_ context.Context, _, _, _ string) ([]byte
 
 var _ provider.Provider = (*mockProvider)(nil)
 
+func testHandler(t *testing.T, cfg *config.Config, providers map[string]provider.Provider) http.Handler {
+	t.Helper()
+	handler, err := Handler(cfg, providers)
+	if err != nil {
+		t.Fatalf("Handler() error: %v", err)
+	}
+	return handler
+}
+
 func TestHandler_RendersDashboard(t *testing.T) {
 	cfg := &config.Config{
 		Services: []config.ServiceConfig{
@@ -53,11 +63,7 @@ func TestHandler_RendersDashboard(t *testing.T) {
 		},
 	}
 
-	providers := map[string]provider.Provider{"github": mock}
-	handler, err := Handler(cfg, providers)
-	if err != nil {
-		t.Fatalf("Handler() error: %v", err)
-	}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
@@ -77,6 +83,9 @@ func TestHandler_RendersDashboard(t *testing.T) {
 	if !strings.Contains(body, "v1.2.3") {
 		t.Error("expected page to contain version 'v1.2.3'")
 	}
+	if !strings.Contains(body, "htmx") {
+		t.Error("expected page to contain htmx reference")
+	}
 }
 
 func TestHandler_ProviderError(t *testing.T) {
@@ -86,16 +95,8 @@ func TestHandler_ProviderError(t *testing.T) {
 		},
 	}
 
-	mock := &mockProvider{
-		name: "github",
-		err:  errors.New("API error"),
-	}
-
-	providers := map[string]provider.Provider{"github": mock}
-	handler, err := Handler(cfg, providers)
-	if err != nil {
-		t.Fatalf("Handler() error: %v", err)
-	}
+	mock := &mockProvider{name: "github", err: errors.New("API error")}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
@@ -112,12 +113,7 @@ func TestHandler_ProviderError(t *testing.T) {
 }
 
 func TestHandler_NoServices(t *testing.T) {
-	cfg := &config.Config{}
-	providers := map[string]provider.Provider{}
-	handler, err := Handler(cfg, providers)
-	if err != nil {
-		t.Fatalf("Handler() error: %v", err)
-	}
+	handler := testHandler(t, &config.Config{}, map[string]provider.Provider{})
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
@@ -125,6 +121,161 @@ func TestHandler_NoServices(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "No services configured") {
+		t.Error("expected empty state message")
+	}
+}
+
+func TestPartialStats(t *testing.T) {
+	cfg := &config.Config{
+		Services: []config.ServiceConfig{
+			{Name: "svc", Repo: "github.com/org/svc"},
+		},
+	}
+	mock := &mockProvider{name: "github", release: &model.Release{Tag: "v1.0.0"}}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/partials/stats", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Services") {
+		t.Error("expected stats partial to contain 'Services'")
+	}
+}
+
+func TestPartialServices(t *testing.T) {
+	cfg := &config.Config{
+		Services: []config.ServiceConfig{
+			{Name: "svc", Repo: "github.com/org/svc"},
+		},
+	}
+	mock := &mockProvider{name: "github", release: &model.Release{Tag: "v2.0.0"}}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/partials/services", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "v2.0.0") {
+		t.Error("expected services partial to contain 'v2.0.0'")
+	}
+}
+
+func TestAddService(t *testing.T) {
+	cfg := &config.Config{}
+	mock := &mockProvider{name: "github", release: &model.Release{Tag: "v1.0.0"}}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
+
+	form := url.Values{}
+	form.Set("name", "new-svc")
+	form.Set("repo", "github.com/org/new-svc")
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	if len(cfg.Services) != 1 || cfg.Services[0].Name != "new-svc" {
+		t.Fatalf("expected service to be added, got %v", cfg.Services)
+	}
+}
+
+func TestAddService_Duplicate(t *testing.T) {
+	cfg := &config.Config{
+		Services: []config.ServiceConfig{{Name: "existing", Repo: "github.com/org/existing"}},
+	}
+	handler := testHandler(t, cfg, map[string]provider.Provider{})
+
+	form := url.Values{}
+	form.Set("name", "existing")
+	form.Set("repo", "github.com/org/existing")
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestAddService_BadRepo(t *testing.T) {
+	handler := testHandler(t, &config.Config{}, map[string]provider.Provider{})
+
+	form := url.Values{}
+	form.Set("name", "bad")
+	form.Set("repo", "not-valid")
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestAddService_MissingFields(t *testing.T) {
+	handler := testHandler(t, &config.Config{}, map[string]provider.Provider{})
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/services", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestDeleteService(t *testing.T) {
+	cfg := &config.Config{
+		Services: []config.ServiceConfig{
+			{Name: "svc-a", Repo: "github.com/org/a"},
+			{Name: "svc-b", Repo: "github.com/org/b"},
+		},
+	}
+	mock := &mockProvider{name: "github", release: &model.Release{Tag: "v1.0.0"}}
+	handler := testHandler(t, cfg, map[string]provider.Provider{"github": mock})
+
+	req := httptest.NewRequest(http.MethodDelete, "/dashboard/services/svc-a", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	if len(cfg.Services) != 1 || cfg.Services[0].Name != "svc-b" {
+		t.Fatalf("expected svc-a removed, got %v", cfg.Services)
+	}
+}
+
+func TestDeleteService_NotFound(t *testing.T) {
+	handler := testHandler(t, &config.Config{}, map[string]provider.Provider{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/dashboard/services/ghost", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
 
@@ -136,13 +287,7 @@ func TestFetchDashboardData(t *testing.T) {
 		},
 	}
 
-	mock := &mockProvider{
-		name: "github",
-		release: &model.Release{
-			Tag: "v3.0.0",
-		},
-	}
-
+	mock := &mockProvider{name: "github", release: &model.Release{Tag: "v3.0.0"}}
 	providers := map[string]provider.Provider{"github": mock}
 	data := fetchDashboardData(context.Background(), cfg, providers)
 

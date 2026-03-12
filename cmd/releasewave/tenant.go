@@ -28,8 +28,6 @@ var tenantCreateCmd = &cobra.Command{
 	Short: "Create a new tenant",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		plan, _ := cmd.Flags().GetString("plan")
-
 		db, err := openTenantDB()
 		if err != nil {
 			return err
@@ -41,7 +39,7 @@ var tenantCreateCmd = &cobra.Command{
 			return err
 		}
 
-		t, err := ts.Create(args[0], plan)
+		t, err := ts.Create(args[0])
 		if err != nil {
 			return fmt.Errorf("create tenant: %w", err)
 		}
@@ -59,7 +57,6 @@ var tenantCreateCmd = &cobra.Command{
 
 		fmt.Printf("Tenant created:\n")
 		fmt.Printf("  Name:    %s\n", t.Name)
-		fmt.Printf("  Plan:    %s\n", t.Plan)
 		fmt.Printf("  API Key: %s\n", rawKey)
 		fmt.Printf("\nSave this API key — it won't be shown again.\n")
 		return nil
@@ -91,9 +88,9 @@ var tenantListCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("%-20s %-8s %s\n", "NAME", "PLAN", "CREATED")
+		fmt.Printf("%-20s %s\n", "NAME", "CREATED")
 		for _, t := range tenants {
-			fmt.Printf("%-20s %-8s %s\n", t.Name, t.Plan, t.CreatedAt.Format("2006-01-02"))
+			fmt.Printf("%-20s %s\n", t.Name, t.CreatedAt.Format("2006-01-02"))
 		}
 		return nil
 	},
@@ -124,7 +121,6 @@ var tenantDeleteCmd = &cobra.Command{
 }
 
 func init() {
-	tenantCreateCmd.Flags().String("plan", "free", "tenant plan (free, pro)")
 	tenantCmd.AddCommand(tenantCreateCmd)
 	tenantCmd.AddCommand(tenantListCmd)
 	tenantCmd.AddCommand(tenantDeleteCmd)
