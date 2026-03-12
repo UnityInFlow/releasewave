@@ -25,6 +25,9 @@ coverage.html
 .DS_Store
 Thumbs.db
 
+# Claude Code
+.claude/worktrees/
+
 # Config with secrets (not the example)
 config.yaml
 !config.example.yaml

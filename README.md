@@ -13,12 +13,17 @@ Universal release/version aggregator for microservices. Checks releases across G
 - **Container Registry**: Query image tags from any OCI-compatible registry (GHCR, Docker Hub, ECR, etc.)
 - **Kubernetes**: Read deployed versions, auto-discover services, compare release vs deployed
 - **Security**: CVE checking via OSV.dev database
-- **Web Dashboard**: Real-time service status dashboard at `/dashboard`
-- **Notifications**: Webhook notifications on new releases
+- **Web Dashboard**: Interactive htmx-powered dashboard with live updates at `/dashboard`
+- **REST API**: Full JSON API for programmatic access
+- **Notifications**: Slack, Discord, and webhook notifications on new releases
+- **Background Daemon**: Automatic polling with configurable intervals
+- **Multi-tenant**: API key management for team access control
+- **GitHub App**: Automatic release detection via GitHub webhooks
 - **CLI**: Direct commands for querying releases, tags, and service status
 - **Concurrent**: Checks multiple services in parallel
 - **Cached**: In-memory cache with configurable TTL
 - **Rate-limited**: Per-provider rate limiting to respect API limits
+- **SQLite Persistence**: Release history and tool call logging
 - **Single binary**: No runtime dependencies, cross-platform
 
 ## Quick Start
@@ -26,19 +31,17 @@ Universal release/version aggregator for microservices. Checks releases across G
 ### Install
 
 ```bash
+# Homebrew
+brew install UnityInFlow/tap/releasewave
+
 # From source
 go install github.com/UnityInFlow/releasewave/cmd/releasewave@latest
-
-# Or download a release binary
-# https://github.com/UnityInFlow/releasewave/releases
 
 # Docker
 docker run -p 7891:7891 ghcr.io/unityinflow/releasewave:latest
 
-# Or build from repo
-git clone https://github.com/UnityInFlow/releasewave.git
-cd releasewave
-make build
+# Download a release binary
+# https://github.com/UnityInFlow/releasewave/releases
 ```
 
 ### Configure
@@ -59,7 +62,7 @@ releasewave install
 
 # Or start manually
 releasewave serve                    # stdio (default, for AI tools)
-releasewave serve --transport=sse    # HTTP+SSE on port 7891 (+ web dashboard)
+releasewave serve --transport=sse    # HTTP+SSE on port 7891 (+ web dashboard + API)
 ```
 
 ### Use as CLI
@@ -72,11 +75,61 @@ releasewave check                     # check all configured services
 
 # GitLab support
 releasewave releases gitlab-org/gitlab --platform gitlab
-releasewave latest my-org/my-project --platform gitlab
 
 # Kubernetes auto-discovery
 releasewave discover --namespace production
 releasewave discover --merge    # auto-add discovered services to config
+
+# Background monitoring
+releasewave daemon --interval=5m
+```
+
+### Web Dashboard
+
+When running in SSE mode, an interactive dashboard is available at `http://localhost:7891/dashboard`:
+
+- Live service status with 30s auto-refresh (htmx)
+- Add/remove services from the UI
+- Platform badges, version tags, release links
+
+```bash
+releasewave serve --transport=sse --port=7891
+# Open http://localhost:7891/dashboard
+```
+
+### REST API
+
+```bash
+# List services with latest releases
+curl http://localhost:7891/api/v1/services
+
+# Release history for a service
+curl http://localhost:7891/api/v1/services/my-api/releases
+
+# Cross-service timeline
+curl http://localhost:7891/api/v1/timeline
+
+# Add a service
+curl -X POST http://localhost:7891/api/v1/services \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"my-api","repo":"github.com/org/my-api"}'
+
+# Delete a service
+curl -X DELETE http://localhost:7891/api/v1/services/my-api
+```
+
+### Multi-tenant Access
+
+```bash
+# Create a tenant with API key
+releasewave tenant create my-team
+# => Tenant created:
+# =>   Name:    my-team
+# =>   API Key: rw_abc123...
+# => Save this API key — it won't be shown again.
+
+releasewave tenant list
+releasewave tenant delete my-team
 ```
 
 ## MCP Tools
@@ -113,6 +166,8 @@ releasewave discover --merge    # auto-add discovered services to config
 | `changelog_between_versions` | Aggregate release notes between two versions |
 | `security_advisories` | Check for CVEs affecting a package version (OSV.dev) |
 | `release_timeline` | Cross-service release timeline sorted by date |
+| `release_diff` | Compare deployed vs latest with changelog |
+| `release_history` | Query local release history from SQLite |
 
 ### Dependency & Upgrade Tools
 
@@ -121,7 +176,7 @@ releasewave discover --merge    # auto-add discovered services to config
 | `get_repo_file` | Fetch file content from a repo (go.mod, package.json, etc.) |
 | `dependency_matrix` | Analyze shared dependencies across configured services |
 | `upgrade_plan` | Generate prioritized upgrade plan for outdated services |
-| `watch_releases` | Detect new releases and send webhook notifications |
+| `watch_releases` | Detect new releases and send notifications |
 | `service_graph` | Build a dependency graph showing shared libraries across services |
 
 ## Configuration
@@ -132,8 +187,9 @@ releasewave discover --merge    # auto-add discovered services to config
 services:
   - name: my-api
     repo: github.com/my-org/my-api
-  - name: billing
-    repo: gitlab.com/my-org/billing
+    registry: ghcr.io/my-org/my-api
+  - name: frontend
+    repo: github.com/my-org/frontend
 
 tokens:
   github: ""   # or set GITHUB_TOKEN env var
@@ -144,6 +200,7 @@ cache:
 
 server:
   port: 7891
+  api_key: ""  # or set RELEASEWAVE_API_KEY env var
 
 rate_limit:
   github: 5    # requests per second
@@ -152,10 +209,20 @@ rate_limit:
 notifications:
   enabled: false
   webhook_url: "https://hooks.slack.com/services/..."
+  slack:
+    webhook_url: ""
+  discord:
+    webhook_url: ""
+
+storage:
+  path: ""     # e.g. ~/.config/releasewave/releasewave.db
+
+daemon:
+  interval: 5m
 
 log:
-  level: info
-  format: text
+  level: info    # debug, info, warn, error
+  format: text   # text, json
 ```
 
 ### Kubernetes Auto-Discovery
@@ -171,15 +238,6 @@ metadata:
 ```
 
 If no annotations are present, ReleaseWave will attempt to infer the repository from the container image name.
-
-## Web Dashboard
-
-When running in SSE mode, a web dashboard is available at `http://localhost:7891/dashboard` showing real-time status of all configured services.
-
-```bash
-releasewave serve --transport=sse --port=7891
-# Open http://localhost:7891/dashboard
-```
 
 ## Docker
 
@@ -207,22 +265,29 @@ make clean     # clean build artifacts
 ```
 cmd/releasewave/          CLI entry point (Cobra commands)
 internal/
+  api/                    REST API (JSON endpoints)
+  cache/                  Thread-safe in-memory TTL cache
   config/                 YAML config loading + validation
+  daemon/                 Background polling daemon
+  discovery/              K8s service auto-discovery
+  errors/                 Typed errors (NotFound, RateLimit, Auth)
+  githubapp/              GitHub App integration (JWT, webhooks)
+  k8s/                    Kubernetes integration (client-go)
+  logging/                Structured logging setup (slog)
+  mcpserver/              MCP server (stdio + SSE, 18 tools)
+  metrics/                Prometheus tool call metrics
+  middleware/             HTTP middleware (auth, metrics)
   model/                  Core data types (Release, Tag, Service)
+  notify/                 Notifications (Slack, Discord, webhook)
   provider/               Provider interface + cached decorator
     github/               GitHub REST API client
     gitlab/               GitLab REST API client
-  mcpserver/              MCP server (stdio + SSE, 18 tools)
-  registry/               OCI container registry client
-  k8s/                    Kubernetes integration (client-go)
-  security/               Vulnerability checking (OSV.dev API)
-  discovery/              K8s service auto-discovery
-  notify/                 Webhook notification system
-  web/                    Web dashboard (html/template)
-  cache/                  Thread-safe in-memory TTL cache
   ratelimit/              Token-bucket rate limiter
-  errors/                 Typed errors (NotFound, RateLimit, Auth)
-  logging/                Structured logging setup (slog)
+  registry/               OCI container registry client
+  security/               Vulnerability checking (OSV.dev API)
+  store/                  SQLite persistence (releases, tool calls)
+  tenant/                 Multi-tenant CRUD + API key management
+  web/                    Web dashboard (htmx + Tailwind)
 ```
 
 ## License

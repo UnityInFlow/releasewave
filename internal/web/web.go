@@ -1,12 +1,14 @@
-// Package web provides a minimal web dashboard for ReleaseWave.
+// Package web provides the web dashboard for ReleaseWave.
 package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,24 +35,149 @@ type dashboardData struct {
 	UpdatedAt     string
 }
 
-// Handler returns an http.Handler that serves the web dashboard.
+// Handler returns an http.Handler that serves the web dashboard with htmx partials.
 func Handler(cfg *config.Config, providers map[string]provider.Provider) (http.Handler, error) {
 	tmpl, err := template.ParseFS(templateFS, "dashboard.html")
 	if err != nil {
 		return nil, fmt.Errorf("web: failed to parse embedded template: %w", err)
 	}
 
+	h := &dashboardHandler{cfg: cfg, providers: providers, tmpl: tmpl}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		data := fetchDashboardData(r.Context(), cfg, providers)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(w, data); err != nil {
-			slog.Error("web.render", "error", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
-	})
+	mux.HandleFunc("/dashboard", h.fullPage)
+	mux.HandleFunc("/dashboard/partials/stats", h.partialStats)
+	mux.HandleFunc("/dashboard/partials/services", h.partialServices)
+	mux.HandleFunc("POST /dashboard/services", h.addService)
+	mux.HandleFunc("DELETE /dashboard/services/{name}", h.deleteService)
 
 	return mux, nil
+}
+
+type dashboardHandler struct {
+	cfg       *config.Config
+	providers map[string]provider.Provider
+	tmpl      *template.Template
+	mu        sync.RWMutex
+}
+
+func (h *dashboardHandler) fullPage(w http.ResponseWriter, r *http.Request) {
+	data := h.getData(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.Execute(w, data); err != nil {
+		slog.Error("web.render", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (h *dashboardHandler) partialStats(w http.ResponseWriter, r *http.Request) {
+	data := h.getData(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.ExecuteTemplate(w, "stats", data); err != nil {
+		slog.Error("web.render.stats", "error", err)
+	}
+}
+
+func (h *dashboardHandler) partialServices(w http.ResponseWriter, r *http.Request) {
+	data := h.getData(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.ExecuteTemplate(w, "services", data); err != nil {
+		slog.Error("web.render.services", "error", err)
+	}
+}
+
+func (h *dashboardHandler) addService(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("name")
+	repo := r.FormValue("repo")
+	registry := r.FormValue("registry")
+
+	if name == "" || repo == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "name and repo are required"}); err != nil {
+			slog.Error("web.write", "error", err)
+		}
+		return
+	}
+
+	parts := strings.Split(repo, "/")
+	if len(parts) < 3 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "repo must be host/owner/repo format"}); err != nil {
+			slog.Error("web.write", "error", err)
+		}
+		return
+	}
+
+	h.mu.Lock()
+	for _, svc := range h.cfg.Services {
+		if svc.Name == name {
+			h.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "service already exists"}); err != nil {
+				slog.Error("web.write", "error", err)
+			}
+			return
+		}
+	}
+	h.cfg.Services = append(h.cfg.Services, config.ServiceConfig{
+		Name:     name,
+		Repo:     repo,
+		Registry: registry,
+	})
+	h.mu.Unlock()
+
+	slog.Info("web.add_service", "name", name, "repo", repo)
+
+	// Return updated services partial.
+	data := h.getData(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.ExecuteTemplate(w, "services", data); err != nil {
+		slog.Error("web.render.services", "error", err)
+	}
+}
+
+func (h *dashboardHandler) deleteService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	h.mu.Lock()
+	found := false
+	services := make([]config.ServiceConfig, 0, len(h.cfg.Services))
+	for _, svc := range h.cfg.Services {
+		if svc.Name == name {
+			found = true
+			continue
+		}
+		services = append(services, svc)
+	}
+	if found {
+		h.cfg.Services = services
+	}
+	h.mu.Unlock()
+
+	if !found {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "service not found"}); err != nil {
+			slog.Error("web.write", "error", err)
+		}
+		return
+	}
+
+	slog.Info("web.delete_service", "name", name)
+
+	// Return updated services partial.
+	data := h.getData(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.ExecuteTemplate(w, "services", data); err != nil {
+		slog.Error("web.render.services", "error", err)
+	}
+}
+
+func (h *dashboardHandler) getData(ctx context.Context) dashboardData {
+	return fetchDashboardData(ctx, h.cfg, h.providers)
 }
 
 // fetchDashboardData queries all configured services concurrently and returns dashboard data.

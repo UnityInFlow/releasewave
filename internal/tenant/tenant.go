@@ -11,7 +11,6 @@ import (
 type Tenant struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
-	Plan      string    `json:"plan"` // "free" or "pro"
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -45,7 +44,6 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS tenants (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
-			plan TEXT NOT NULL DEFAULT 'free',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS tenant_services (
@@ -65,13 +63,10 @@ func (s *Store) migrate() error {
 }
 
 // Create adds a new tenant.
-func (s *Store) Create(name, plan string) (*Tenant, error) {
-	if plan == "" {
-		plan = "free"
-	}
+func (s *Store) Create(name string) (*Tenant, error) {
 	result, err := s.db.Exec(
-		`INSERT INTO tenants (name, plan) VALUES (?, ?)`,
-		name, plan,
+		`INSERT INTO tenants (name) VALUES (?)`,
+		name,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create tenant: %w", err)
@@ -80,15 +75,15 @@ func (s *Store) Create(name, plan string) (*Tenant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get tenant id: %w", err)
 	}
-	return &Tenant{ID: id, Name: name, Plan: plan, CreatedAt: time.Now()}, nil
+	return &Tenant{ID: id, Name: name, CreatedAt: time.Now()}, nil
 }
 
 // Get retrieves a tenant by name.
 func (s *Store) Get(name string) (*Tenant, error) {
 	var t Tenant
 	err := s.db.QueryRow(
-		`SELECT id, name, plan, created_at FROM tenants WHERE name = ?`, name,
-	).Scan(&t.ID, &t.Name, &t.Plan, &t.CreatedAt)
+		`SELECT id, name, created_at FROM tenants WHERE name = ?`, name,
+	).Scan(&t.ID, &t.Name, &t.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("tenant %q not found", name)
 	}
@@ -100,7 +95,7 @@ func (s *Store) Get(name string) (*Tenant, error) {
 
 // List returns all tenants.
 func (s *Store) List() ([]Tenant, error) {
-	rows, err := s.db.Query(`SELECT id, name, plan, created_at FROM tenants ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, created_at FROM tenants ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +104,7 @@ func (s *Store) List() ([]Tenant, error) {
 	var tenants []Tenant
 	for rows.Next() {
 		var t Tenant
-		if err := rows.Scan(&t.ID, &t.Name, &t.Plan, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		tenants = append(tenants, t)

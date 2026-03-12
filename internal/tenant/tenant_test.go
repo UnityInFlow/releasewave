@@ -2,7 +2,6 @@ package tenant
 
 import (
 	"database/sql"
-	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -41,11 +40,11 @@ func setupStores(t *testing.T) (*sql.DB, *Store, *KeyStore) {
 func TestStore_CreateAndGet(t *testing.T) {
 	_, store, _ := setupStores(t)
 
-	created, err := store.Create("acme", "pro")
+	created, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if created.Name != "acme" || created.Plan != "pro" {
+	if created.Name != "acme" {
 		t.Fatalf("unexpected tenant: %+v", created)
 	}
 
@@ -59,18 +58,15 @@ func TestStore_CreateAndGet(t *testing.T) {
 	if got.Name != "acme" {
 		t.Fatalf("name mismatch: got %q, want %q", got.Name, "acme")
 	}
-	if got.Plan != "pro" {
-		t.Fatalf("plan mismatch: got %q, want %q", got.Plan, "pro")
-	}
 }
 
 func TestStore_CreateDuplicateFails(t *testing.T) {
 	_, store, _ := setupStores(t)
 
-	if _, err := store.Create("acme", "free"); err != nil {
+	if _, err := store.Create("acme"); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	_, err := store.Create("acme", "pro")
+	_, err := store.Create("acme")
 	if err == nil {
 		t.Fatal("expected error for duplicate tenant, got nil")
 	}
@@ -81,7 +77,7 @@ func TestStore_ListReturnsAll(t *testing.T) {
 
 	names := []string{"alpha", "beta", "gamma"}
 	for _, n := range names {
-		if _, err := store.Create(n, "free"); err != nil {
+		if _, err := store.Create(n); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 	}
@@ -104,7 +100,7 @@ func TestStore_ListReturnsAll(t *testing.T) {
 func TestStore_DeleteSucceeds(t *testing.T) {
 	_, store, _ := setupStores(t)
 
-	if _, err := store.Create("acme", "free"); err != nil {
+	if _, err := store.Create("acme"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if err := store.Delete("acme"); err != nil {
@@ -137,7 +133,7 @@ func TestStore_GetNonExistentReturnsError(t *testing.T) {
 func TestStore_AddServiceAndListServices(t *testing.T) {
 	_, store, _ := setupStores(t)
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -180,7 +176,7 @@ func TestStore_ForeignKeyCascadeDeletesServices(t *testing.T) {
 		t.Fatal("PRAGMA foreign_keys is OFF; cascade will not work")
 	}
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -209,7 +205,7 @@ func TestStore_ForeignKeyCascadeDeletesServices(t *testing.T) {
 func TestKeyStore_GenerateHasRWPrefix(t *testing.T) {
 	_, store, ks := setupStores(t)
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
@@ -218,7 +214,7 @@ func TestKeyStore_GenerateHasRWPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !strings.HasPrefix(rawKey, "rw_") {
+	if len(rawKey) < 4 || rawKey[:3] != "rw_" {
 		t.Fatalf("raw key %q does not start with 'rw_'", rawKey)
 	}
 	if key.TenantID != tenant.ID {
@@ -232,7 +228,7 @@ func TestKeyStore_GenerateHasRWPrefix(t *testing.T) {
 func TestKeyStore_ValidateCorrectKey(t *testing.T) {
 	_, store, ks := setupStores(t)
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
@@ -254,7 +250,7 @@ func TestKeyStore_ValidateCorrectKey(t *testing.T) {
 func TestKeyStore_ValidateWrongKeyReturnsError(t *testing.T) {
 	_, store, ks := setupStores(t)
 
-	if _, err := store.Create("acme", "free"); err != nil {
+	if _, err := store.Create("acme"); err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
 
@@ -267,7 +263,7 @@ func TestKeyStore_ValidateWrongKeyReturnsError(t *testing.T) {
 func TestKeyStore_ListForTenant(t *testing.T) {
 	_, store, ks := setupStores(t)
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
@@ -300,7 +296,7 @@ func TestKeyStore_ListForTenant(t *testing.T) {
 func TestKeyStore_RevokeRemovesKey(t *testing.T) {
 	_, store, ks := setupStores(t)
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
@@ -351,7 +347,7 @@ func TestKeyStore_ForeignKeyCascadeDeletesKeys(t *testing.T) {
 		t.Fatal("PRAGMA foreign_keys is OFF; cascade will not work")
 	}
 
-	tenant, err := store.Create("acme", "free")
+	tenant, err := store.Create("acme")
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
