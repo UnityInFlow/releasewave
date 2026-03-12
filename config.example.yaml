@@ -6,8 +6,8 @@ services:
   # - name: my-api
   #   repo: github.com/my-org/my-api
   #   registry: ghcr.io/my-org/my-api
-  # - name: billing
-  #   repo: gitlab.com/my-org/billing
+  # - name: frontend
+  #   repo: github.com/my-org/frontend
 
 # API tokens (can also use GITHUB_TOKEN / GITLAB_TOKEN env vars)
 tokens:
