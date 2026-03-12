@@ -12,7 +12,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // Config holds GitHub App configuration.
@@ -170,11 +173,19 @@ func (a *App) ListRepos(ctx context.Context, installationID int64) ([]string, er
 }
 
 func (a *App) generateJWT() (string, error) {
-	// Simple JWT generation using RS256 for GitHub App auth.
-	// In production, use a proper JWT library. This is a minimal implementation.
-	slog.Debug("githubapp.jwt", "app_id", a.config.AppID)
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:    strconv.FormatInt(a.config.AppID, 10),
+		IssuedAt:  jwt.NewNumericDate(now.Add(-60 * time.Second)),
+		ExpiresAt: jwt.NewNumericDate(now.Add(10 * time.Minute)),
+	}
 
-	// For now, return a placeholder. A real implementation would create a JWT
-	// signed with the private key, with iss=AppID, iat=now-60s, exp=now+10m.
-	return "", fmt.Errorf("JWT generation requires a JWT library — configure tokens.github instead for direct token auth")
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	signed, err := token.SignedString(a.privateKey)
+	if err != nil {
+		return "", fmt.Errorf("sign JWT: %w", err)
+	}
+
+	slog.Debug("githubapp.jwt", "app_id", a.config.AppID)
+	return signed, nil
 }

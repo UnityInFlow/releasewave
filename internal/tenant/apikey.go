@@ -33,6 +33,10 @@ func NewKeyStore(db *sql.DB) (*KeyStore, error) {
 }
 
 func (ks *KeyStore) migrate() error {
+	if _, err := ks.db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+
 	_, err := ks.db.Exec(`CREATE TABLE IF NOT EXISTS api_keys (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		tenant_id INTEGER NOT NULL,

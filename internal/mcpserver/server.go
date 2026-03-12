@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -376,8 +377,11 @@ func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Ha
 	mux.Handle("/", auth(s.sse))
 
 	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: middleware.Metrics(mux),
+		Addr:         addr,
+		Handler:      middleware.Metrics(mux),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	slog.Info("server.start", "transport", "sse", "addr", addr)

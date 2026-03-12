@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/UnityInFlow/releasewave/internal/config"
@@ -18,11 +19,11 @@ func Handler(cfg *config.Config, providers map[string]provider.Provider, st *sto
 	mux := http.NewServeMux()
 	a := &apiHandler{cfg: cfg, providers: providers, store: st}
 
-	mux.HandleFunc("GET /api/v1/services", a.listServices)
-	mux.HandleFunc("GET /api/v1/services/{name}/releases", a.getServiceReleases)
-	mux.HandleFunc("GET /api/v1/timeline", a.getTimeline)
-	mux.HandleFunc("POST /api/v1/services", a.addService)
-	mux.HandleFunc("DELETE /api/v1/services/{name}", a.deleteService)
+	mux.HandleFunc("GET /v1/services", a.listServices)
+	mux.HandleFunc("GET /v1/services/{name}/releases", a.getServiceReleases)
+	mux.HandleFunc("GET /v1/timeline", a.getTimeline)
+	mux.HandleFunc("POST /v1/services", a.addService)
+	mux.HandleFunc("DELETE /v1/services/{name}", a.deleteService)
 
 	return mux
 }
@@ -31,6 +32,7 @@ type apiHandler struct {
 	cfg       *config.Config
 	providers map[string]provider.Provider
 	store     *store.Store
+	mu        sync.RWMutex
 }
 
 func (a *apiHandler) listServices(w http.ResponseWriter, r *http.Request) {
@@ -42,33 +44,46 @@ func (a *apiHandler) listServices(w http.ResponseWriter, r *http.Request) {
 		Error    string `json:"error,omitempty"`
 	}
 
-	services := make([]svcInfo, 0, len(a.cfg.Services))
-	for _, svc := range a.cfg.Services {
-		info := svcInfo{Name: svc.Name, Repo: svc.Repo, Registry: svc.Registry}
+	a.mu.RLock()
+	svcs := make([]config.ServiceConfig, len(a.cfg.Services))
+	copy(svcs, a.cfg.Services)
+	a.mu.RUnlock()
 
-		parsed, err := config.ParseRepo(svc.Repo)
-		if err != nil {
-			info.Error = err.Error()
-			services = append(services, info)
-			continue
-		}
+	// Fetch latest releases concurrently.
+	services := make([]svcInfo, len(svcs))
+	var wg sync.WaitGroup
+	ctx := r.Context()
 
-		p, ok := a.providers[parsed.Platform]
-		if !ok {
-			info.Error = "unsupported platform"
-			services = append(services, info)
-			continue
-		}
+	for i, svc := range svcs {
+		wg.Add(1)
+		go func(idx int, svc config.ServiceConfig) {
+			defer wg.Done()
+			info := svcInfo{Name: svc.Name, Repo: svc.Repo, Registry: svc.Registry}
 
-		ctx := r.Context()
-		release, err := p.GetLatestRelease(ctx, parsed.Owner, parsed.RepoName)
-		if err != nil {
-			info.Error = err.Error()
-		} else {
-			info.Latest = release.Tag
-		}
-		services = append(services, info)
+			parsed, err := config.ParseRepo(svc.Repo)
+			if err != nil {
+				info.Error = err.Error()
+				services[idx] = info
+				return
+			}
+
+			p, ok := a.providers[parsed.Platform]
+			if !ok {
+				info.Error = "unsupported platform"
+				services[idx] = info
+				return
+			}
+
+			release, err := p.GetLatestRelease(ctx, parsed.Owner, parsed.RepoName)
+			if err != nil {
+				info.Error = err.Error()
+			} else {
+				info.Latest = release.Tag
+			}
+			services[idx] = info
+		}(i, svc)
 	}
+	wg.Wait()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total":    len(services),
@@ -119,8 +134,13 @@ func (a *apiHandler) getTimeline(w http.ResponseWriter, r *http.Request) {
 		PublishedAt time.Time `json:"published_at"`
 	}
 
+	a.mu.RLock()
+	svcs := make([]config.ServiceConfig, len(a.cfg.Services))
+	copy(svcs, a.cfg.Services)
+	a.mu.RUnlock()
+
 	var timeline []entry
-	for _, svc := range a.cfg.Services {
+	for _, svc := range svcs {
 		history, err := a.store.GetHistory(svc.Name, 20)
 		if err != nil {
 			continue
@@ -143,6 +163,8 @@ func (a *apiHandler) getTimeline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *apiHandler) addService(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
+
 	var req struct {
 		Name     string `json:"name"`
 		Repo     string `json:"repo"`
@@ -158,18 +180,21 @@ func (a *apiHandler) addService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for duplicates.
+	parts := strings.Split(req.Repo, "/")
+	if len(parts) < 3 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo must be host/owner/repo format"})
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check for duplicates under lock.
 	for _, svc := range a.cfg.Services {
 		if svc.Name == req.Name {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "service already exists"})
 			return
 		}
-	}
-
-	parts := strings.Split(req.Repo, "/")
-	if len(parts) < 3 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo must be host/owner/repo format"})
-		return
 	}
 
 	a.cfg.Services = append(a.cfg.Services, config.ServiceConfig{
@@ -183,6 +208,9 @@ func (a *apiHandler) addService(w http.ResponseWriter, r *http.Request) {
 
 func (a *apiHandler) deleteService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	found := false
 	services := make([]config.ServiceConfig, 0, len(a.cfg.Services))

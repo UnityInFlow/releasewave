@@ -1,3 +1,4 @@
+// Package metrics defines Prometheus metrics for MCP tool calls and caching.
 package metrics
 
 import (

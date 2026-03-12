@@ -25,6 +25,7 @@ type Daemon struct {
 	mu        sync.Mutex
 	stopCh    chan struct{}
 	stopped   chan struct{}
+	stopOnce  sync.Once
 }
 
 // New creates a new Daemon.
@@ -47,14 +48,7 @@ func (d *Daemon) Start(ctx context.Context) {
 
 	slog.Info("daemon.start", "interval", d.interval, "services", len(d.cfg.Services))
 
-	// Load known versions from store if available.
-	if d.store != nil {
-		for _, svc := range d.cfg.Services {
-			if val, found, err := d.store.GetKV("version:" + svc.Name); err == nil && found {
-				d.known[svc.Name] = val
-			}
-		}
-	}
+	d.loadKnownVersions()
 
 	// Run first check immediately.
 	d.poll(ctx)
@@ -74,15 +68,29 @@ func (d *Daemon) Start(ctx context.Context) {
 	}
 }
 
-// Stop signals the daemon to stop.
+// Stop signals the daemon to stop. Safe to call multiple times.
 func (d *Daemon) Stop() {
-	close(d.stopCh)
+	d.stopOnce.Do(func() { close(d.stopCh) })
 	<-d.stopped
 }
 
-// RunOnce executes a single poll cycle.
+// RunOnce executes a single poll cycle, loading known versions from the store first.
 func (d *Daemon) RunOnce(ctx context.Context) {
+	d.loadKnownVersions()
 	d.poll(ctx)
+}
+
+func (d *Daemon) loadKnownVersions() {
+	if d.store == nil {
+		return
+	}
+	for _, svc := range d.cfg.Services {
+		if val, found, err := d.store.GetKV("version:" + svc.Name); err == nil && found {
+			d.mu.Lock()
+			d.known[svc.Name] = val
+			d.mu.Unlock()
+		}
+	}
 }
 
 func (d *Daemon) poll(ctx context.Context) {
@@ -124,15 +132,19 @@ func (d *Daemon) checkService(ctx context.Context, svc config.ServiceConfig) {
 
 	// Persist to store.
 	if d.store != nil {
-		_ = d.store.SetKV("version:"+svc.Name, release.Tag)
-		_ = d.store.RecordRelease(store.Release{
+		if err := d.store.SetKV("version:"+svc.Name, release.Tag); err != nil {
+			slog.Error("daemon.store.set_kv", "service", svc.Name, "error", err)
+		}
+		if err := d.store.RecordRelease(store.Release{
 			Service:      svc.Name,
 			Tag:          release.Tag,
 			Platform:     parsed.Platform,
 			URL:          release.HTMLURL,
 			PublishedAt:  release.PublishedAt,
 			DiscoveredAt: time.Now(),
-		})
+		}); err != nil {
+			slog.Error("daemon.store.record_release", "service", svc.Name, "error", err)
+		}
 	}
 
 	isNew := seen && old != release.Tag

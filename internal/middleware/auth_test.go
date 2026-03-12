@@ -48,15 +48,29 @@ func TestAPIKeyAuth_XAPIKeyHeader(t *testing.T) {
 	}
 }
 
-func TestAPIKeyAuth_QueryParam(t *testing.T) {
+func TestAPIKeyAuth_QueryParam_Rejected(t *testing.T) {
+	// Query param auth was removed to prevent key leakage in logs/referrer headers.
 	handler := APIKeyAuth("secret123")(okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/?api_key=secret123", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 (query param auth removed), got %d", rec.Code)
+	}
+}
+
+func TestAPIKeyAuth_JSONContentType(t *testing.T) {
+	handler := APIKeyAuth("secret123")(okHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected application/json content-type, got %q", ct)
 	}
 }
 

@@ -1,3 +1,4 @@
+// Package logging provides structured log initialization for ReleaseWave.
 package logging
 
 import (
