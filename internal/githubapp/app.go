@@ -30,6 +30,7 @@ type App struct {
 	config     Config
 	privateKey *rsa.PrivateKey
 	httpClient *http.Client
+	baseURL    string // defaults to "https://api.github.com"
 }
 
 // New creates a GitHub App instance.
@@ -57,6 +58,7 @@ func New(cfg Config) (*App, error) {
 		config:     cfg,
 		privateKey: key,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    "https://api.github.com",
 	}, nil
 }
 
@@ -71,7 +73,7 @@ type Installation struct {
 
 // ListInstallations returns all installations of this GitHub App.
 func (a *App) ListInstallations(ctx context.Context) ([]Installation, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/app/installations", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/app/installations", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +105,7 @@ func (a *App) ListInstallations(ctx context.Context) ([]Installation, error) {
 
 // GetInstallationToken generates an access token for an installation.
 func (a *App) GetInstallationToken(ctx context.Context, installationID int64) (string, error) {
-	url := fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationID)
+	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", a.baseURL, installationID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return "", err
@@ -143,7 +145,7 @@ func (a *App) ListRepos(ctx context.Context, installationID int64) ([]string, er
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/installation/repositories", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/installation/repositories", nil)
 	if err != nil {
 		return nil, err
 	}
