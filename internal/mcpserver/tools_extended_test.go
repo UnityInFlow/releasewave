@@ -34,10 +34,10 @@ require github.com/spf13/cobra v1.7.0
 	deps := parseDeps("go.mod", content)
 
 	expected := map[string]string{
-		"golang.org/x/net":          "v0.10.0",
+		"golang.org/x/net":            "v0.10.0",
 		"github.com/stretchr/testify": "v1.8.4",
-		"golang.org/x/text":         "v0.9.0",
-		"github.com/spf13/cobra":    "v1.7.0",
+		"golang.org/x/text":           "v0.9.0",
+		"github.com/spf13/cobra":      "v1.7.0",
 	}
 
 	for k, v := range expected {
