@@ -67,7 +67,10 @@ func (ks *KeyStore) Generate(tenantID int64) (rawKey string, key *APIKey, err er
 		return "", nil, fmt.Errorf("store key: %w", err)
 	}
 
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return "", nil, fmt.Errorf("get key id: %w", err)
+	}
 	return raw, &APIKey{
 		ID:        id,
 		TenantID:  tenantID,
@@ -121,7 +124,10 @@ func (ks *KeyStore) Revoke(keyID int64) error {
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("key not found")
 	}

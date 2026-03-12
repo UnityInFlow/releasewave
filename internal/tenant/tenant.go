@@ -123,7 +123,10 @@ func (s *Store) Delete(name string) error {
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("tenant %q not found", name)
 	}
