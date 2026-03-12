@@ -3,6 +3,8 @@ package cache
 import (
 	"sync"
 	"time"
+
+	"github.com/UnityInFlow/releasewave/internal/metrics"
 )
 
 type entry struct {
@@ -35,8 +37,10 @@ func (c *Cache) Get(key string) (any, bool) {
 		if ok {
 			c.Delete(key)
 		}
+		metrics.CacheHitsTotal.WithLabelValues("miss").Inc()
 		return nil, false
 	}
+	metrics.CacheHitsTotal.WithLabelValues("hit").Inc()
 	return e.value, true
 }
 

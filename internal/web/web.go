@@ -3,6 +3,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -33,11 +34,10 @@ type dashboardData struct {
 }
 
 // Handler returns an http.Handler that serves the web dashboard.
-func Handler(cfg *config.Config, providers map[string]provider.Provider) http.Handler {
+func Handler(cfg *config.Config, providers map[string]provider.Provider) (http.Handler, error) {
 	tmpl, err := template.ParseFS(templateFS, "dashboard.html")
 	if err != nil {
-		// This should not happen since the template is embedded at compile time.
-		panic("web: failed to parse embedded template: " + err.Error())
+		return nil, fmt.Errorf("web: failed to parse embedded template: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -50,7 +50,7 @@ func Handler(cfg *config.Config, providers map[string]provider.Provider) http.Ha
 		}
 	})
 
-	return mux
+	return mux, nil
 }
 
 // fetchDashboardData queries all configured services concurrently and returns dashboard data.

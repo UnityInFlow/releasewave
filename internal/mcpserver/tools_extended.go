@@ -140,6 +140,28 @@ func (s *Server) registerExtendedTools() {
 		s.handleServiceGraph,
 	)
 
+	// ── Phase 10: Diff & History Tools ──────────────────────────────
+
+	s.mcp.AddTool(
+		mcp.NewTool("release_diff",
+			mcp.WithDescription("Compare a service's deployed version (from K8s) against the latest release, showing the changelog between them."),
+			mcp.WithString("service", mcp.Description("Service name (must be in config)"), mcp.Required()),
+			mcp.WithString("namespace", mcp.Description("Kubernetes namespace"), mcp.DefaultString("default")),
+			mcp.WithString("kubeconfig", mcp.Description("Path to kubeconfig"), mcp.DefaultString("")),
+			mcp.WithString("context", mcp.Description("Kubernetes context"), mcp.DefaultString("")),
+		),
+		s.handleReleaseDiff,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("release_history",
+			mcp.WithDescription("Query local release history for a service from the SQLite database."),
+			mcp.WithString("service", mcp.Description("Service name"), mcp.Required()),
+			mcp.WithNumber("limit", mcp.Description("Maximum number of releases to return")),
+		),
+		s.handleReleaseHistory,
+	)
+
 	// ── Phase 9: Discovery Tools ─────────────────────────────────────
 
 	s.mcp.AddTool(
@@ -175,8 +197,7 @@ func (s *Server) handleListImageTags(ctx context.Context, request mcp.CallToolRe
 		info.Tags = info.Tags[:50]
 	}
 
-	data, _ := json.MarshalIndent(info, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(info)
 }
 
 func (s *Server) handleCompareImageTags(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -202,8 +223,7 @@ func (s *Server) handleCompareImageTags(ctx context.Context, request mcp.CallToo
 		"same_image": same,
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 // ── Phase 6: Kubernetes Handlers ─────────────────────────────────────
@@ -224,8 +244,7 @@ func (s *Server) handleListK8sDeployments(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list deployments: %v", err)), nil
 	}
 
-	data, _ := json.MarshalIndent(services, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(services)
 }
 
 func (s *Server) handleCompareReleaseVsDeployed(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -306,8 +325,7 @@ func (s *Server) handleCompareReleaseVsDeployed(ctx context.Context, request mcp
 
 	wg.Wait()
 
-	data, _ := json.MarshalIndent(results, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(results)
 }
 
 // ── Phase 7: Extended Analysis Handlers ──────────────────────────────
@@ -375,8 +393,7 @@ func (s *Server) handleChangelogBetweenVersions(ctx context.Context, request mcp
 		"changelog":  changelog,
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 func (s *Server) handleSecurityAdvisories(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -410,8 +427,7 @@ func (s *Server) handleSecurityAdvisories(ctx context.Context, request mcp.CallT
 		result["status"] = fmt.Sprintf("%d vulnerabilities found", len(vulns))
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 func (s *Server) handleReleaseTimeline(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -486,8 +502,7 @@ func (s *Server) handleReleaseTimeline(ctx context.Context, request mcp.CallTool
 		"timeline": entries,
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 // ── Phase 8: Dependency & Upgrade Handlers ───────────────────────────
@@ -521,8 +536,7 @@ func (s *Server) handleGetRepoFile(ctx context.Context, request mcp.CallToolRequ
 		"content":    string(content),
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 // depFiles are the standard dependency file names to look for.
@@ -606,8 +620,7 @@ func (s *Server) handleDependencyMatrix(ctx context.Context, request mcp.CallToo
 		"results":          results,
 	}
 
-	data, _ := json.MarshalIndent(output, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(output)
 }
 
 func (s *Server) handleUpgradePlan(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -729,8 +742,7 @@ func (s *Server) handleUpgradePlan(ctx context.Context, request mcp.CallToolRequ
 		"upgrade_plan":   entries,
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }
 
 func (s *Server) handleWatchReleases(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -751,8 +763,12 @@ func (s *Server) handleWatchReleases(ctx context.Context, request mcp.CallToolRe
 
 	// Build a notifier if configured
 	var notifier notify.Notifier
-	if s.config.Notifications.Enabled && s.config.Notifications.WebhookURL != "" {
-		notifier = notify.NewWebhookNotifier(s.config.Notifications.WebhookURL)
+	if s.config.Notifications.Enabled {
+		notifier = notify.FromConfig(
+			s.config.Notifications.WebhookURL,
+			s.config.Notifications.Slack.WebhookURL,
+			s.config.Notifications.Discord.WebhookURL,
+		)
 	}
 
 	results := make([]watchResult, len(s.config.Services))
@@ -835,8 +851,7 @@ func (s *Server) handleWatchReleases(ctx context.Context, request mcp.CallToolRe
 		"results":          results,
 	}
 
-	data, _ := json.MarshalIndent(output, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(output)
 }
 
 // ── Service Graph Handler ────────────────────────────────────────────
@@ -983,8 +998,7 @@ func (s *Server) handleServiceGraph(ctx context.Context, request mcp.CallToolReq
 		"shared_libraries":    shared,
 	}
 
-	data, _ := json.MarshalIndent(output, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(output)
 }
 
 // parseDeps extracts dependency name→version pairs from common dependency files.
@@ -1057,6 +1071,137 @@ func parseDeps(filename, content string) map[string]string {
 	return deps
 }
 
+// ── Phase 10: Diff & History Handlers ────────────────────────────────
+
+func (s *Server) handleReleaseDiff(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serviceName := request.GetString("service", "")
+	namespace := request.GetString("namespace", "default")
+	kubeconfig := request.GetString("kubeconfig", "")
+	kctx := request.GetString("context", "")
+	slog.Info("tool.call", "tool", "release_diff", "service", serviceName)
+
+	if serviceName == "" {
+		return mcp.NewToolResultError("service is required"), nil
+	}
+
+	// Find the service in config.
+	var svc *config.ServiceConfig
+	for i := range s.config.Services {
+		if s.config.Services[i].Name == serviceName {
+			svc = &s.config.Services[i]
+			break
+		}
+	}
+	if svc == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("service %q not found in config", serviceName)), nil
+	}
+
+	parsed, err := config.ParseRepo(svc.Repo)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	p, err := s.getProvider(parsed.Platform)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Get latest release.
+	latest, err := p.GetLatestRelease(ctx, parsed.Owner, parsed.RepoName)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to get latest release: %v", err)), nil
+	}
+
+	// Try to get deployed version from K8s.
+	var deployedVer string
+	k8sClient, k8sErr := k8s.New(kubeconfig, kctx)
+	if k8sErr == nil {
+		deployed, err := k8sClient.ListAll(ctx, namespace)
+		if err == nil {
+			for _, d := range deployed {
+				if d.Name == serviceName {
+					deployedVer = d.AppVersion
+					break
+				}
+			}
+		}
+	}
+
+	result := map[string]any{
+		"service":          serviceName,
+		"latest_release":   latest.Tag,
+		"deployed_version": deployedVer,
+		"release_url":      latest.HTMLURL,
+	}
+
+	// If we have both versions and they differ, get changelog.
+	if deployedVer != "" && deployedVer != latest.Tag {
+		releases, err := p.ListReleases(ctx, parsed.Owner, parsed.RepoName)
+		if err == nil {
+			var changelog []map[string]string
+			inRange := false
+			for _, r := range releases {
+				if r.Tag == latest.Tag {
+					inRange = true
+				}
+				if inRange {
+					entry := map[string]string{
+						"tag":  r.Tag,
+						"name": r.Name,
+						"date": r.PublishedAt.Format("2006-01-02"),
+					}
+					if r.Body != "" {
+						body := r.Body
+						if len(body) > 300 {
+							body = body[:297] + "..."
+						}
+						entry["notes"] = body
+					}
+					changelog = append(changelog, entry)
+				}
+				tag := r.Tag
+				if tag == deployedVer || tag == "v"+deployedVer || strings.TrimPrefix(tag, "v") == deployedVer {
+					break
+				}
+			}
+			result["changelog"] = changelog
+			result["versions_behind"] = len(changelog)
+		}
+	} else if deployedVer == latest.Tag {
+		result["status"] = "up to date"
+	} else if deployedVer == "" {
+		result["status"] = "deployed version unknown (no K8s connection or deployment not found)"
+	}
+
+	return marshalResult(result)
+}
+
+func (s *Server) handleReleaseHistory(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serviceName := request.GetString("service", "")
+	limit := request.GetInt("limit", 50)
+	slog.Info("tool.call", "tool", "release_history", "service", serviceName)
+
+	if serviceName == "" {
+		return mcp.NewToolResultError("service is required"), nil
+	}
+
+	if s.store == nil {
+		return mcp.NewToolResultError("no storage configured — set storage.path in config"), nil
+	}
+
+	history, err := s.store.GetHistory(serviceName, limit)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("query history: %v", err)), nil
+	}
+
+	result := map[string]any{
+		"service":  serviceName,
+		"total":    len(history),
+		"releases": history,
+	}
+	return marshalResult(result)
+}
+
 // ── Phase 9: Discovery Handlers ──────────────────────────────────────
 
 func (s *Server) handleDiscoverServices(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1081,6 +1226,5 @@ func (s *Server) handleDiscoverServices(ctx context.Context, request mcp.CallToo
 		"services":   services,
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(result)
 }

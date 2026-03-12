@@ -20,12 +20,44 @@ type Config struct {
 	RateLimit     RateLimitConfig    `yaml:"rate_limit"`
 	Log           LogConfig          `yaml:"log"`
 	Notifications NotificationConfig `yaml:"notifications"`
+	Storage       StorageConfig      `yaml:"storage"`
+	Daemon        DaemonConfig       `yaml:"daemon"`
+	GitHubApp     GitHubAppConfig    `yaml:"github_app"`
+}
+
+// GitHubAppConfig holds GitHub App settings.
+type GitHubAppConfig struct {
+	AppID          int64  `yaml:"app_id"`
+	PrivateKeyPath string `yaml:"private_key_path"`
+	WebhookSecret  string `yaml:"webhook_secret"`
+}
+
+// DaemonConfig controls the background polling daemon.
+type DaemonConfig struct {
+	Interval string `yaml:"interval"` // Polling interval (e.g. "5m", "1h"). Default: 5m.
+}
+
+// StorageConfig controls SQLite persistence.
+type StorageConfig struct {
+	Path string `yaml:"path"` // Path to SQLite database file. Empty = no persistence.
 }
 
 // NotificationConfig controls release notifications.
 type NotificationConfig struct {
+	WebhookURL string        `yaml:"webhook_url"`
+	Enabled    bool          `yaml:"enabled"`
+	Slack      SlackConfig   `yaml:"slack"`
+	Discord    DiscordConfig `yaml:"discord"`
+}
+
+// SlackConfig holds Slack notification settings.
+type SlackConfig struct {
 	WebhookURL string `yaml:"webhook_url"`
-	Enabled    bool   `yaml:"enabled"`
+}
+
+// DiscordConfig holds Discord notification settings.
+type DiscordConfig struct {
+	WebhookURL string `yaml:"webhook_url"`
 }
 
 // ServiceConfig defines a tracked microservice.
@@ -54,7 +86,8 @@ func (c CacheConfig) TTLDuration() time.Duration {
 
 // ServerConfig controls the MCP server.
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port   int    `yaml:"port"`
+	APIKey string `yaml:"api_key"`
 }
 
 // TokenConfig holds API tokens for various platforms.
@@ -105,6 +138,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server.port: must be 0-65535, got %d", c.Server.Port)
 	}
 
+	if c.RateLimit.GitHub < 0 || c.RateLimit.GitHub > 1000 {
+		return fmt.Errorf("rate_limit.github: must be 0-1000, got %v", c.RateLimit.GitHub)
+	}
+	if c.RateLimit.GitLab < 0 || c.RateLimit.GitLab > 1000 {
+		return fmt.Errorf("rate_limit.gitlab: must be 0-1000, got %v", c.RateLimit.GitLab)
+	}
+
+	if c.Notifications.WebhookURL != "" {
+		if !strings.HasPrefix(c.Notifications.WebhookURL, "http://") && !strings.HasPrefix(c.Notifications.WebhookURL, "https://") {
+			return fmt.Errorf("notifications.webhook_url: must start with http:// or https://, got %q", c.Notifications.WebhookURL)
+		}
+	}
+
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	if c.Log.Level != "" && !validLevels[c.Log.Level] {
+		return fmt.Errorf("log.level: must be debug, info, warn, or error, got %q", c.Log.Level)
+	}
+
+	validFormats := map[string]bool{"text": true, "json": true}
+	if c.Log.Format != "" && !validFormats[c.Log.Format] {
+		return fmt.Errorf("log.format: must be text or json, got %q", c.Log.Format)
+	}
+
 	return nil
 }
 
@@ -152,6 +208,9 @@ func Load(path string) (*Config, error) {
 	}
 	if t := os.Getenv("GITLAB_TOKEN"); t != "" {
 		cfg.Tokens.GitLab = t
+	}
+	if k := os.Getenv("RELEASEWAVE_API_KEY"); k != "" {
+		cfg.Server.APIKey = k
 	}
 
 	return &cfg, nil
@@ -235,6 +294,7 @@ cache:
 # MCP server settings
 server:
   port: 7891
+  api_key: ""  # or set RELEASEWAVE_API_KEY env var
 
 # Rate limiting (requests per second)
 rate_limit:

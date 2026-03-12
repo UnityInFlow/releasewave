@@ -54,7 +54,10 @@ func TestHandler_RendersDashboard(t *testing.T) {
 	}
 
 	providers := map[string]provider.Provider{"github": mock}
-	handler := Handler(cfg, providers)
+	handler, err := Handler(cfg, providers)
+	if err != nil {
+		t.Fatalf("Handler() error: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
@@ -89,7 +92,10 @@ func TestHandler_ProviderError(t *testing.T) {
 	}
 
 	providers := map[string]provider.Provider{"github": mock}
-	handler := Handler(cfg, providers)
+	handler, err := Handler(cfg, providers)
+	if err != nil {
+		t.Fatalf("Handler() error: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
@@ -108,7 +114,10 @@ func TestHandler_ProviderError(t *testing.T) {
 func TestHandler_NoServices(t *testing.T) {
 	cfg := &config.Config{}
 	providers := map[string]provider.Provider{}
-	handler := Handler(cfg, providers)
+	handler, err := Handler(cfg, providers)
+	if err != nil {
+		t.Fatalf("Handler() error: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()

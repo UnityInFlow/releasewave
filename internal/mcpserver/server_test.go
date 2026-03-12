@@ -21,6 +21,7 @@ type mockProvider struct {
 	releases        []model.Release
 	latestRelease   *model.Release
 	tags            []model.Tag
+	fileContent     map[string][]byte
 	listReleasesErr error
 	getLatestErr    error
 	listTagsErr     error
@@ -49,8 +50,13 @@ func (m *mockProvider) ListTags(_ context.Context, _, _ string) ([]model.Tag, er
 	return m.tags, nil
 }
 
-func (m *mockProvider) GetFileContent(_ context.Context, _, _, _ string) ([]byte, error) {
-	return nil, errors.New("not implemented in mock")
+func (m *mockProvider) GetFileContent(_ context.Context, _, _, path string) ([]byte, error) {
+	if m.fileContent != nil {
+		if data, ok := m.fileContent[path]; ok {
+			return data, nil
+		}
+	}
+	return nil, errors.New("file not found")
 }
 
 // Compile-time check that mockProvider implements provider.Provider.
@@ -930,5 +936,171 @@ func TestServerInfo(t *testing.T) {
 	}
 	if !strings.Contains(info, "list_releases") {
 		t.Error("expected Info to list tools")
+	}
+}
+
+// ── marshalResult ──────────────────────────────────────────────────────
+
+func TestMarshalResult(t *testing.T) {
+	t.Run("marshals struct to JSON text result", func(t *testing.T) {
+		data := map[string]string{"key": "value"}
+		result, err := marshalResult(data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text := resultText(t, result)
+		if !strings.Contains(text, `"key": "value"`) {
+			t.Errorf("expected JSON with key/value, got: %s", text)
+		}
+	})
+
+	t.Run("returns error for unmarshalable value", func(t *testing.T) {
+		_, err := marshalResult(make(chan int))
+		if err == nil {
+			t.Error("expected error for channel type")
+		}
+	})
+}
+
+// ── handleGetRepoFile ──────────────────────────────────────────────────
+
+func TestHandleGetRepoFile(t *testing.T) {
+	mock := &mockProvider{
+		name: "github",
+		fileContent: map[string][]byte{
+			"go.mod": []byte("module example.com/app\n\ngo 1.21\n"),
+		},
+	}
+	s := testServer(mock)
+
+	t.Run("returns file content", func(t *testing.T) {
+		req := newCallToolRequest(map[string]any{
+			"owner": "testorg", "repo": "testrepo", "path": "go.mod", "platform": "github",
+		})
+		result, err := s.handleGetRepoFile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isErrorResult(result) {
+			t.Fatalf("expected success, got error: %s", resultText(t, result))
+		}
+		text := resultText(t, result)
+		if !strings.Contains(text, "module example.com/app") {
+			t.Errorf("expected file content, got: %s", text)
+		}
+	})
+
+	t.Run("returns error for missing params", func(t *testing.T) {
+		req := newCallToolRequest(map[string]any{"owner": "testorg"})
+		result, err := s.handleGetRepoFile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !isErrorResult(result) {
+			t.Error("expected error result for missing params")
+		}
+	})
+}
+
+// ── handleDependencyMatrix ─────────────────────────────────────────────
+
+func TestHandleDependencyMatrix(t *testing.T) {
+	mock := &mockProvider{
+		name: "github",
+		fileContent: map[string][]byte{
+			"go.mod": []byte("module example.com/app\n\ngo 1.21\n\nrequire (\n\tgolang.org/x/net v0.10.0\n)\n"),
+		},
+	}
+
+	services := []config.ServiceConfig{
+		{Name: "api", Repo: "github.com/testorg/api"},
+	}
+	s := testServerWithServices(mock, services)
+
+	req := newCallToolRequest(nil)
+	result, err := s.handleDependencyMatrix(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isErrorResult(result) {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "api") {
+		t.Error("expected result to contain service name")
+	}
+}
+
+// ── handleServiceGraph ─────────────────────────────────────────────────
+
+func TestHandleServiceGraph(t *testing.T) {
+	mock := &mockProvider{
+		name: "github",
+		fileContent: map[string][]byte{
+			"go.mod": []byte("module example.com/app\n\ngo 1.21\n\nrequire (\n\tgolang.org/x/net v0.10.0\n)\n"),
+		},
+	}
+
+	services := []config.ServiceConfig{
+		{Name: "api", Repo: "github.com/testorg/api"},
+		{Name: "web", Repo: "github.com/testorg/web"},
+	}
+	s := testServerWithServices(mock, services)
+
+	req := newCallToolRequest(nil)
+	result, err := s.handleServiceGraph(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isErrorResult(result) {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "shared_deps") {
+		t.Error("expected result to contain shared_deps")
+	}
+}
+
+// ── handleWatchReleases ────────────────────────────────────────────────
+
+func TestHandleWatchReleases(t *testing.T) {
+	latest := sampleReleases()[0]
+	mock := &mockProvider{
+		name:          "github",
+		latestRelease: &latest,
+	}
+
+	services := []config.ServiceConfig{
+		{Name: "api", Repo: "github.com/testorg/api"},
+	}
+	s := testServerWithServices(mock, services)
+
+	// First call — should record versions without notifying.
+	req := newCallToolRequest(nil)
+	result, err := s.handleWatchReleases(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isErrorResult(result) {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "v2.0.0") {
+		t.Error("expected result to contain latest version")
+	}
+
+	// Second call with same version — no new releases.
+	result2, err := s.handleWatchReleases(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text2 := resultText(t, result2)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(text2), &parsed); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	newReleases := parsed["new_releases"].(float64)
+	if newReleases != 0 {
+		t.Errorf("expected 0 new releases on second call, got %v", newReleases)
 	}
 }

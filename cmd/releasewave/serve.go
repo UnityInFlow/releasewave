@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/UnityInFlow/releasewave/internal/api"
 	"github.com/UnityInFlow/releasewave/internal/mcpserver"
 	"github.com/UnityInFlow/releasewave/internal/web"
 )
@@ -24,7 +25,10 @@ var serveCmd = &cobra.Command{
 		transport, _ := cmd.Flags().GetString("transport")
 		port, _ := cmd.Flags().GetInt("port")
 
-		srv := mcpserver.New(cfg, version)
+		srv, err := mcpserver.New(cfg, version)
+		if err != nil {
+			return fmt.Errorf("create server: %w", err)
+		}
 
 		switch transport {
 		case "stdio":
@@ -51,10 +55,15 @@ var serveCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, srv.Info())
 			fmt.Fprintf(os.Stderr, "Dashboard: http://localhost%s/dashboard\n", addr)
 
-			// Serve the web dashboard on the same port alongside the MCP SSE endpoints.
-			dashboard := web.Handler(srv.Config(), srv.Providers())
+			// Serve the web dashboard and REST API alongside the MCP SSE endpoints.
+			dashboard, err := web.Handler(srv.Config(), srv.Providers())
+			if err != nil {
+				return fmt.Errorf("web dashboard: %w", err)
+			}
+			apiHandler := api.CORS(api.Logging(api.Handler(srv.Config(), srv.Providers(), srv.Store())))
 			return srv.StartWithHandlers(addr, map[string]http.Handler{
 				"/dashboard": dashboard,
+				"/api":       apiHandler,
 			})
 
 		default:

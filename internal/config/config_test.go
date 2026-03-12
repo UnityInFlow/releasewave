@@ -76,6 +76,50 @@ func TestTTLDuration(t *testing.T) {
 	}
 }
 
+func TestValidate_RateLimitBounds(t *testing.T) {
+	cfg := &Config{RateLimit: RateLimitConfig{GitHub: 2000}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for rate limit > 1000")
+	}
+	cfg = &Config{RateLimit: RateLimitConfig{GitLab: -1}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for negative rate limit")
+	}
+}
+
+func TestValidate_WebhookURL(t *testing.T) {
+	cfg := &Config{Notifications: NotificationConfig{WebhookURL: "ftp://invalid"}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for non-http webhook URL")
+	}
+	cfg = &Config{Notifications: NotificationConfig{WebhookURL: "https://hooks.slack.com/xxx"}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected no error for valid https webhook URL, got: %v", err)
+	}
+}
+
+func TestValidate_LogLevel(t *testing.T) {
+	cfg := &Config{Log: LogConfig{Level: "verbose"}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for invalid log level")
+	}
+	cfg = &Config{Log: LogConfig{Level: "debug"}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected no error for valid log level, got: %v", err)
+	}
+}
+
+func TestValidate_LogFormat(t *testing.T) {
+	cfg := &Config{Log: LogConfig{Format: "xml"}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for invalid log format")
+	}
+	cfg = &Config{Log: LogConfig{Format: "json"}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected no error for valid log format, got: %v", err)
+	}
+}
+
 func TestParseRepo(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,27 +12,41 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/UnityInFlow/releasewave/internal/cache"
 	"github.com/UnityInFlow/releasewave/internal/config"
+	"github.com/UnityInFlow/releasewave/internal/middleware"
 	"github.com/UnityInFlow/releasewave/internal/provider"
 	gh "github.com/UnityInFlow/releasewave/internal/provider/github"
 	gl "github.com/UnityInFlow/releasewave/internal/provider/gitlab"
 	"github.com/UnityInFlow/releasewave/internal/ratelimit"
+	"github.com/UnityInFlow/releasewave/internal/store"
 )
 
 // Server wraps the MCP server and its dependencies.
 type Server struct {
 	mcp               *server.MCPServer
 	sse               *server.SSEServer
+	httpServer        *http.Server
 	config            *config.Config
 	providers         map[string]provider.Provider
+	store             *store.Store
 	mu                sync.Mutex
 	lastKnownVersions map[string]string
 }
 
+// marshalResult marshals v as indented JSON and wraps it in an MCP text result.
+func marshalResult(v any) (*mcp.CallToolResult, error) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal result: %w", err)
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
 // New creates a new ReleaseWave MCP server with all tools registered.
-func New(cfg *config.Config, version string) *Server {
+func New(cfg *config.Config, version string) (*Server, error) {
 	mcpServer := server.NewMCPServer(
 		"releasewave",
 		version,
@@ -61,9 +76,18 @@ func New(cfg *config.Config, version string) *Server {
 		providers: providers,
 	}
 
+	// Initialize SQLite store if configured.
+	if cfg.Storage.Path != "" {
+		st, err := store.New(cfg.Storage.Path)
+		if err != nil {
+			return nil, fmt.Errorf("open store: %w", err)
+		}
+		s.store = st
+	}
+
 	s.registerTools()
 	s.registerExtendedTools()
-	return s
+	return s, nil
 }
 
 func (s *Server) registerTools() {
@@ -145,8 +169,7 @@ func (s *Server) handleListReleases(ctx context.Context, request mcp.CallToolReq
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list releases: %v", err)), nil
 	}
 
-	data, _ := json.MarshalIndent(releases, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(releases)
 }
 
 func (s *Server) handleGetLatestRelease(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -171,8 +194,7 @@ func (s *Server) handleGetLatestRelease(ctx context.Context, request mcp.CallToo
 		return mcp.NewToolResultError(fmt.Sprintf("failed to get latest release: %v", err)), nil
 	}
 
-	data, _ := json.MarshalIndent(release, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(release)
 }
 
 func (s *Server) handleListTags(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -197,8 +219,7 @@ func (s *Server) handleListTags(ctx context.Context, request mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list tags: %v", err)), nil
 	}
 
-	data, _ := json.MarshalIndent(tags, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(tags)
 }
 
 // handleCheckServices checks all services concurrently.
@@ -254,8 +275,7 @@ func (s *Server) handleCheckServices(ctx context.Context, request mcp.CallToolRe
 
 	wg.Wait()
 
-	data, _ := json.MarshalIndent(results, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(results)
 }
 
 func (s *Server) handleFindOutdated(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -310,8 +330,7 @@ func (s *Server) handleFindOutdated(ctx context.Context, request mcp.CallToolReq
 
 	wg.Wait()
 
-	data, _ := json.MarshalIndent(statuses, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	return marshalResult(statuses)
 }
 
 // ServeStdio starts the MCP server using stdio transport (for Claude Code, Cursor, etc.).
@@ -338,35 +357,52 @@ func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Ha
 
 	// Build a mux that serves both the extra handlers and the SSE server.
 	mux := http.NewServeMux()
+	auth := middleware.APIKeyAuth(s.config.Server.APIKey)
 
-	// Health endpoint for monitoring.
+	// Health endpoint for monitoring — unauthenticated.
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	for pattern, handler := range extraHandlers {
-		mux.Handle(pattern+"/", http.StripPrefix(pattern, handler))
-		mux.Handle(pattern, handler)
-	}
-	// Fall through to SSE server for MCP endpoints.
-	mux.Handle("/", s.sse)
+	// Prometheus metrics endpoint — unauthenticated.
+	mux.Handle("/metrics", promhttp.Handler())
 
-	srv := &http.Server{
+	for pattern, handler := range extraHandlers {
+		mux.Handle(pattern+"/", http.StripPrefix(pattern, auth(handler)))
+		mux.Handle(pattern, auth(handler))
+	}
+	// Fall through to SSE server for MCP endpoints — authenticated.
+	mux.Handle("/", auth(s.sse))
+
+	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: middleware.Metrics(mux),
 	}
 
 	slog.Info("server.start", "transport", "sse", "addr", addr)
-	return srv.ListenAndServe()
+	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully stops the SSE server.
+// Shutdown gracefully stops the HTTP and SSE servers.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.sse != nil {
-		return s.sse.Shutdown(ctx)
+	var errs []error
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("http server: %w", err))
+		}
 	}
-	return nil
+	if s.sse != nil {
+		if err := s.sse.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("sse server: %w", err))
+		}
+	}
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("store: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // MCPServer returns the underlying MCP server (for custom transport wiring).
@@ -384,6 +420,11 @@ func (s *Server) Providers() map[string]provider.Provider {
 	return s.providers
 }
 
+// Store returns the server's persistence store (may be nil).
+func (s *Server) Store() *store.Store {
+	return s.store
+}
+
 // Info returns a summary for display.
 func (s *Server) Info() string {
 	var b strings.Builder
@@ -393,7 +434,8 @@ func (s *Server) Info() string {
 	b.WriteString("       compare_release_vs_deployed, changelog_between_versions,\n")
 	b.WriteString("       security_advisories, release_timeline, get_repo_file,\n")
 	b.WriteString("       dependency_matrix, upgrade_plan, watch_releases,\n")
-	b.WriteString("       service_graph, discover_services\n")
+	b.WriteString("       service_graph, discover_services,\n")
+	b.WriteString("       release_diff, release_history\n")
 	b.WriteString("Providers: github, gitlab\n")
 	b.WriteString(fmt.Sprintf("Services configured: %d\n", len(s.config.Services)))
 	return b.String()
