@@ -36,7 +36,7 @@ Key problems:
 
 ### P1 Fixes (security/reliability)
 
-4. **HTTP server timeouts** — Added `ReadTimeout: 15s`, `WriteTimeout: 60s`, `IdleTimeout: 120s` to `http.Server`.
+4. **HTTP server timeouts** — Added `ReadTimeout: 15s`, `IdleTimeout: 120s` to `http.Server`. No `WriteTimeout` (kills long-lived SSE connections).
 
 5. **Request body limit** — Added `http.MaxBytesReader(w, r.Body, 1<<20)` on POST endpoints.
 

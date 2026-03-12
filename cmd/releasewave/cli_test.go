@@ -29,19 +29,24 @@ func TestVersionCommand(t *testing.T) {
 
 	// Version command uses fmt.Printf (writes to os.Stdout), not cobra's buffer.
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stdout = w
 
-	_, err := executeCommand("version")
+	_, execErr := executeCommand("version")
 	w.Close()
 	os.Stdout = oldStdout
 
-	if err != nil {
-		t.Fatalf("version command failed: %v", err)
+	if execErr != nil {
+		t.Fatalf("version command failed: %v", execErr)
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(buf.String(), "1.2.3-test") {
 		t.Fatalf("expected version output to contain '1.2.3-test', got %q", buf.String())
 	}
@@ -54,19 +59,24 @@ func TestVersionCommand_JSON(t *testing.T) {
 
 	// Capture stdout since json encoder writes to os.Stdout.
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stdout = w
 
-	_, err := executeCommand("version", "--json")
+	_, execErr := executeCommand("version", "--json")
 	w.Close()
 	os.Stdout = oldStdout
 
-	if err != nil {
-		t.Fatalf("version --json failed: %v", err)
+	if execErr != nil {
+		t.Fatalf("version --json failed: %v", execErr)
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
 
 	var info map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &info); err != nil {
@@ -162,19 +172,24 @@ func TestCheckCommand_NoServices(t *testing.T) {
 	defer func() { cfgFile = oldCfgFile }()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stdout = w
 
-	_, err := executeCommand("check")
+	_, execErr := executeCommand("check")
 	w.Close()
 	os.Stdout = oldStdout
 
-	if err != nil {
-		t.Fatalf("check with no services should not error, got: %v", err)
+	if execErr != nil {
+		t.Fatalf("check with no services should not error, got: %v", execErr)
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(buf.String(), "No services configured") {
 		t.Fatalf("expected 'No services configured' message, got %q", buf.String())
 	}
