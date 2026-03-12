@@ -37,6 +37,7 @@ brews:
   - repository:
       owner: UnityInFlow
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/UnityInFlow/releasewave"
     description: "Universal release/version aggregator for microservices with MCP server support"
     license: "MIT"
