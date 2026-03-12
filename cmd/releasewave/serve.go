@@ -40,16 +40,15 @@ var serveCmd = &cobra.Command{
 			}
 			addr := fmt.Sprintf(":%d", port)
 
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
 
 			go func() {
-				sig := <-sigCh
-				slog.Info("server.shutdown", "signal", sig.String())
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				<-ctx.Done()
+				slog.Info("server.shutdown", "reason", ctx.Err())
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_ = srv.Shutdown(ctx)
-				os.Exit(0)
+				_ = srv.Shutdown(shutdownCtx)
 			}()
 
 			fmt.Fprintln(os.Stderr, srv.Info())

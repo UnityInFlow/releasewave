@@ -89,7 +89,10 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.
 
 	releases := make([]model.Release, 0, len(glReleases))
 	for _, gr := range glReleases {
-		releasedAt, _ := time.Parse(time.RFC3339, gr.ReleasedAt)
+		releasedAt, err := time.Parse(time.RFC3339, gr.ReleasedAt)
+		if err != nil && gr.ReleasedAt != "" {
+			slog.Debug("gitlab.parse_time", "value", gr.ReleasedAt, "error", err)
+		}
 		htmlURL := fmt.Sprintf("https://gitlab.com/%s/%s/-/releases/%s", owner, repo, gr.TagName)
 		releases = append(releases, model.Release{
 			Tag:         gr.TagName,

@@ -1,4 +1,4 @@
-// Package tenant provides multi-tenancy support for ReleaseWave.
+// Package tenant provides multi-tenancy CRUD and API key management for ReleaseWave.
 package tenant
 
 import (
@@ -37,6 +37,10 @@ func NewStore(db *sql.DB) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS tenants (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +76,10 @@ func (s *Store) Create(name, plan string) (*Tenant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create tenant: %w", err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get tenant id: %w", err)
+	}
 	return &Tenant{ID: id, Name: name, Plan: plan, CreatedAt: time.Now()}, nil
 }
 

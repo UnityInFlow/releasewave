@@ -2,11 +2,12 @@ package middleware
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 )
 
 // APIKeyAuth returns middleware that validates API key authentication.
-// It checks Authorization: Bearer <key>, X-API-Key: <key>, and ?api_key=<key>.
+// It checks Authorization: Bearer <key> and X-API-Key: <key> headers.
 // If apiKey is empty, the middleware is a pass-through (no auth required).
 func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -29,22 +30,24 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 				key = r.Header.Get("X-API-Key")
 			}
 
-			// Check query parameter
 			if key == "" {
-				key = r.URL.Query().Get("api_key")
-			}
-
-			if key == "" {
-				http.Error(w, `{"error":"missing API key"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "missing API key")
 				return
 			}
 
 			if subtle.ConstantTimeCompare([]byte(key), expected) != 1 {
-				http.Error(w, `{"error":"invalid API key"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "invalid API key")
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	_, _ = w.Write(b)
 }

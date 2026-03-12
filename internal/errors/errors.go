@@ -1,3 +1,4 @@
+// Package errors defines sentinel errors and error types for ReleaseWave.
 package errors
 
 import (

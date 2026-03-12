@@ -86,7 +86,10 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]model.
 
 	releases := make([]model.Release, 0, len(ghReleases))
 	for _, gr := range ghReleases {
-		publishedAt, _ := time.Parse(time.RFC3339, gr.PublishedAt)
+		publishedAt, err := time.Parse(time.RFC3339, gr.PublishedAt)
+		if err != nil && gr.PublishedAt != "" {
+			slog.Debug("github.parse_time", "value", gr.PublishedAt, "error", err)
+		}
 		releases = append(releases, model.Release{
 			Tag:         gr.TagName,
 			Name:        gr.Name,
@@ -115,7 +118,10 @@ func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (*mod
 		return nil, fmt.Errorf("parse release JSON: %w", err)
 	}
 
-	publishedAt, _ := time.Parse(time.RFC3339, gr.PublishedAt)
+	publishedAt, err := time.Parse(time.RFC3339, gr.PublishedAt)
+	if err != nil && gr.PublishedAt != "" {
+		slog.Debug("github.parse_time", "value", gr.PublishedAt, "error", err)
+	}
 	release := &model.Release{
 		Tag:         gr.TagName,
 		Name:        gr.Name,
