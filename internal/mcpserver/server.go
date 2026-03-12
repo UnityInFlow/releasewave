@@ -377,11 +377,12 @@ func (s *Server) StartWithHandlers(addr string, extraHandlers map[string]http.Ha
 	mux.Handle("/", auth(s.sse))
 
 	s.httpServer = &http.Server{
-		Addr:         addr,
-		Handler:      middleware.Metrics(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:        addr,
+		Handler:     middleware.Metrics(mux),
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is 0 (unlimited) because SSE connections are long-lived.
+		// Per-request write deadlines can be set via http.ResponseController.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	slog.Info("server.start", "transport", "sse", "addr", addr)

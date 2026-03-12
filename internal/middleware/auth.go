@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 )
 
@@ -47,5 +48,6 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = w.Write([]byte(`{"error":"` + msg + `"}`))
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	_, _ = w.Write(b)
 }

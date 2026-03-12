@@ -56,7 +56,14 @@ func normalizePath(p string) string {
 		return "/sse"
 	case strings.HasPrefix(p, "/message"):
 		return "/message"
+	case strings.HasPrefix(p, "/dashboard"):
+		return "/dashboard"
 	default:
+		// Cap unknown paths at 3 segments to prevent cardinality explosion.
+		parts := strings.SplitN(p, "/", 5) // ["", seg1, seg2, seg3, rest...]
+		if len(parts) > 4 {
+			return strings.Join(parts[:4], "/")
+		}
 		return p
 	}
 }
