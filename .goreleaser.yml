@@ -38,6 +38,8 @@ brews:
       owner: UnityInFlow
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # TODO: set to false once HOMEBREW_TAP_TOKEN secret is configured with a PAT that has repo scope
+    skip_upload: true
     homepage: "https://github.com/UnityInFlow/releasewave"
     description: "Universal release/version aggregator for microservices with MCP server support"
     license: "MIT"
